@@ -1,0 +1,20 @@
+[
+  {
+    "device_code": "TURNSTILE-1",
+    "raw_id": "TURNSTILE-1-001",
+    "event_type": "TURNSTILE_IN",
+    "event_ts": "2026-02-10T08:00:00Z",
+    "employee_no": "E1001"
+  },
+  {
+    "device_code": "TURNSTILE-1",
+    "raw_id": "TURNSTILE-1-002",
+    "event_type": "ESMO_OK",
+    "event_ts": "2026-02-10T08:05:00Z",
+    "employee_no": "E1001",
+    "payload": {
+      "bp": "120/80",
+      "temp": 36.6
+    }
+  }
+]

@@ -1,0 +1,159 @@
+{
+    "app": {
+        "name": "DKZ MineTrack",
+        "testMode": "Platform is running in test mode",
+        "subtitle": "Mine access control system"
+    },
+    "nav": {
+        "dashboard": "Dashboard",
+        "events": "Events",
+        "employees": "Employees",
+        "devices": "Devices",
+        "reports": "Reports",
+        "admin": "Admin"
+    },
+    "auth": {
+        "username": "Username",
+        "password": "Password",
+        "signIn": "Sign In",
+        "signingIn": "Signing in…",
+        "invalidCredentials": "Invalid username or password",
+        "loginFailed": "Login failed"
+    },
+    "dashboard": {
+        "title": "Dashboard",
+        "insideMine": "Inside Mine",
+        "esmoOkToday": "ESMO OK Today",
+        "toolDebts": "Tool Debts",
+        "blockedAttempts": "Blocked Attempts",
+        "employee": "Employee",
+        "name": "Name",
+        "in": "In",
+        "taken": "Taken",
+        "type": "Type",
+        "time": "Time",
+        "reason": "Reason",
+        "noData": "No data",
+        "noDebts": "No debts",
+        "clear": "Clear"
+    },
+    "events": {
+        "title": "Event Journal",
+        "dateFrom": "Date From",
+        "dateTo": "Date To",
+        "employeeNo": "Employee #",
+        "eventType": "Event Type",
+        "status": "Status",
+        "apply": "Apply",
+        "all": "All",
+        "details": "Event Details",
+        "id": "ID",
+        "employeeId": "Employee ID",
+        "deviceId": "Device ID",
+        "rawId": "Raw ID",
+        "device": "Device",
+        "col": {
+            "time": "Time",
+            "type": "Type",
+            "employeeId": "Employee ID",
+            "deviceId": "Device ID",
+            "status": "Status",
+            "reason": "Reason"
+        }
+    },
+    "employees": {
+        "title": "Employees",
+        "addEmployee": "Add Employee",
+        "employeeNo": "Employee #",
+        "firstName": "First Name",
+        "lastName": "Last Name",
+        "patronymic": "Patronymic",
+        "department": "Department",
+        "position": "Position",
+        "create": "Create",
+        "noEmployees": "No employees",
+        "col": {
+            "employeeNo": "Employee #",
+            "lastName": "Last Name",
+            "firstName": "First Name",
+            "patronymic": "Patronymic",
+            "department": "Department",
+            "position": "Position",
+            "status": "Status"
+        }
+    },
+    "devices": {
+        "title": "Devices",
+        "addDevice": "Add Device",
+        "name": "Name",
+        "code": "Code",
+        "host": "IP Address",
+        "type": "Type",
+        "location": "Location",
+        "apiKey": "API Key",
+        "create": "Create",
+        "noDevices": "No devices",
+        "col": {
+            "name": "Name",
+            "code": "Code",
+            "host": "IP",
+            "type": "Type",
+            "location": "Location",
+            "status": "Status"
+        }
+    },
+    "reports": {
+        "title": "Reports",
+        "period": "Period",
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "thisWeek": "This Week",
+        "thisMonth": "This Month",
+        "exportCsv": "Export CSV",
+        "exportPdf": "Export PDF",
+        "dailySummary": "Daily Summary",
+        "metric": "Metric",
+        "count": "Count",
+        "metrics": {
+            "turnstileIn": "Total Turnstile IN",
+            "turnstileOut": "Total Turnstile OUT",
+            "esmoOk": "ESMO OK",
+            "esmoFail": "ESMO FAIL",
+            "toolTakes": "Tool Takes",
+            "toolReturns": "Tool Returns",
+            "mineIn": "Mine IN",
+            "mineOut": "Mine OUT",
+            "blocked": "Blocked Attempts"
+        }
+    },
+    "adminUsers": {
+        "title": "User Management",
+        "col": {
+            "id": "ID",
+            "username": "Username",
+            "role": "Role",
+            "status": "Status"
+        }
+    },
+    "topbar": {
+        "search": "Search employees, devices…",
+        "theme": "Toggle theme",
+        "language": "Language"
+    },
+    "status": {
+        "ok": "OK",
+        "accepted": "Accepted",
+        "rejected": "Rejected",
+        "blocked": "Blocked",
+        "warning": "Warning",
+        "online": "Online",
+        "offline": "Offline",
+        "pending": "Pending",
+        "duplicate": "Duplicate",
+        "error": "Error",
+        "fail": "Fail"
+    },
+    "common": {
+        "noData": "—"
+    }
+}

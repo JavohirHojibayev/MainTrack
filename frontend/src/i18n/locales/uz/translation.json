@@ -1,0 +1,159 @@
+{
+    "app": {
+        "name": "DKZ MineTrack",
+        "testMode": "Platforma test rejimida ishlamoqda",
+        "subtitle": "Kon nazorat tizimi"
+    },
+    "nav": {
+        "dashboard": "Boshqaruv",
+        "events": "Hodisalar",
+        "employees": "Xodimlar",
+        "devices": "Qurilmalar",
+        "reports": "Hisobotlar",
+        "admin": "Admin"
+    },
+    "auth": {
+        "username": "Foydalanuvchi nomi",
+        "password": "Parol",
+        "signIn": "Kirish",
+        "signingIn": "Kirilmoqda…",
+        "invalidCredentials": "Login yoki parol noto'g'ri",
+        "loginFailed": "Kirishda xatolik"
+    },
+    "dashboard": {
+        "title": "Boshqaruv paneli",
+        "insideMine": "Konda",
+        "esmoOkToday": "ESMO OK bugun",
+        "toolDebts": "Asbob qarzlari",
+        "blockedAttempts": "Bloklangan",
+        "employee": "Xodim",
+        "name": "F.I.O.",
+        "in": "Kirish",
+        "taken": "Olingan",
+        "type": "Turi",
+        "time": "Vaqt",
+        "reason": "Sabab",
+        "noData": "Ma'lumot yo'q",
+        "noDebts": "Qarz yo'q",
+        "clear": "Toza"
+    },
+    "events": {
+        "title": "Hodisalar jurnali",
+        "dateFrom": "Sanadan",
+        "dateTo": "Sanagacha",
+        "employeeNo": "Tabel №",
+        "eventType": "Hodisa turi",
+        "status": "Holat",
+        "apply": "Qo'llash",
+        "all": "Hammasi",
+        "details": "Hodisa tafsilotlari",
+        "id": "ID",
+        "employeeId": "Xodim ID",
+        "deviceId": "Qurilma ID",
+        "rawId": "Raw ID",
+        "device": "Qurilma",
+        "col": {
+            "time": "Vaqt",
+            "type": "Tur",
+            "employeeId": "Xodim ID",
+            "deviceId": "Qurilma ID",
+            "status": "Holat",
+            "reason": "Sabab"
+        }
+    },
+    "employees": {
+        "title": "Xodimlar",
+        "addEmployee": "Xodim qo'shish",
+        "employeeNo": "Tabel №",
+        "firstName": "Ismi",
+        "lastName": "Familiyasi",
+        "patronymic": "Otasining ismi",
+        "department": "Bo'lim",
+        "position": "Lavozim",
+        "create": "Yaratish",
+        "noEmployees": "Xodimlar yo'q",
+        "col": {
+            "employeeNo": "Tabel №",
+            "lastName": "Familiya",
+            "firstName": "Ism",
+            "patronymic": "Otasining ismi",
+            "department": "Bo'lim",
+            "position": "Lavozim",
+            "status": "Holat"
+        }
+    },
+    "devices": {
+        "title": "Qurilmalar",
+        "addDevice": "Qurilma qo'shish",
+        "name": "Nomi",
+        "code": "Kod",
+        "host": "IP Manzil",
+        "type": "Turi",
+        "location": "Joylashuv",
+        "apiKey": "API Kalit",
+        "create": "Yaratish",
+        "noDevices": "Qurilmalar yo'q",
+        "col": {
+            "name": "Nomi",
+            "code": "Kod",
+            "host": "IP",
+            "type": "Turi",
+            "location": "Joylashuv",
+            "status": "Holat"
+        }
+    },
+    "reports": {
+        "title": "Hisobotlar",
+        "period": "Davr",
+        "today": "Bugun",
+        "yesterday": "Kecha",
+        "thisWeek": "Shu hafta",
+        "thisMonth": "Shu oy",
+        "exportCsv": "CSV yuklab olish",
+        "exportPdf": "PDF yuklab olish",
+        "dailySummary": "Kunlik xulosa",
+        "metric": "Ko'rsatkich",
+        "count": "Soni",
+        "metrics": {
+            "turnstileIn": "Turniket orqali kirish",
+            "turnstileOut": "Turniket orqali chiqish",
+            "esmoOk": "ESMO OK",
+            "esmoFail": "ESMO RAD",
+            "toolTakes": "Asbob berish",
+            "toolReturns": "Asbob qaytarish",
+            "mineIn": "Konga kirish",
+            "mineOut": "Kondan chiqish",
+            "blocked": "Bloklangan"
+        }
+    },
+    "adminUsers": {
+        "title": "Foydalanuvchilarni boshqarish",
+        "col": {
+            "id": "ID",
+            "username": "Login",
+            "role": "Rol",
+            "status": "Holat"
+        }
+    },
+    "topbar": {
+        "search": "Xodim, qurilma qidirish…",
+        "theme": "Mavzuni almashtirish",
+        "language": "Til"
+    },
+    "status": {
+        "ok": "OK",
+        "accepted": "Qabul qilindi",
+        "rejected": "Rad etildi",
+        "blocked": "Bloklandi",
+        "warning": "Ogohlantirish",
+        "online": "Onlayn",
+        "offline": "Oflayn",
+        "pending": "Kutilmoqda",
+        "duplicate": "Dublikat",
+        "error": "Xato",
+        "fail": "Rad"
+    },
+    "common": {
+        "noData": "—"
+    }
+}

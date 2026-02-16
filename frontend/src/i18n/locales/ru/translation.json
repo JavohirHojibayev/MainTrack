@@ -1,0 +1,159 @@
+{
+    "app": {
+        "name": "DKZ MineTrack",
+        "testMode": "Платформа работает в тестовом режиме",
+        "subtitle": "Система контроля доступа на шахту"
+    },
+    "nav": {
+        "dashboard": "Панель",
+        "events": "События",
+        "employees": "Сотрудники",
+        "devices": "Устройства",
+        "reports": "Отчёты",
+        "admin": "Админ"
+    },
+    "auth": {
+        "username": "Логин",
+        "password": "Пароль",
+        "signIn": "Войти",
+        "signingIn": "Вход…",
+        "invalidCredentials": "Неверный логин или пароль",
+        "loginFailed": "Ошибка входа"
+    },
+    "dashboard": {
+        "title": "Панель управления",
+        "insideMine": "В шахте",
+        "esmoOkToday": "ЭСМО ОК сегодня",
+        "toolDebts": "Задолженности",
+        "blockedAttempts": "Заблокировано",
+        "employee": "Сотрудник",
+        "name": "ФИО",
+        "in": "Вход",
+        "taken": "Выдано",
+        "type": "Тип",
+        "time": "Время",
+        "reason": "Причина",
+        "noData": "Нет данных",
+        "noDebts": "Нет задолженностей",
+        "clear": "Чисто"
+    },
+    "events": {
+        "title": "Журнал событий",
+        "dateFrom": "Дата от",
+        "dateTo": "Дата до",
+        "employeeNo": "Табельный №",
+        "eventType": "Тип события",
+        "status": "Статус",
+        "apply": "Применить",
+        "all": "Все",
+        "details": "Детали события",
+        "id": "ID",
+        "employeeId": "ID сотрудника",
+        "deviceId": "ID устройства",
+        "rawId": "Raw ID",
+        "device": "Устройство",
+        "col": {
+            "time": "Время",
+            "type": "Тип",
+            "employeeId": "ID сотр.",
+            "deviceId": "ID устр.",
+            "status": "Статус",
+            "reason": "Причина"
+        }
+    },
+    "employees": {
+        "title": "Сотрудники",
+        "addEmployee": "Добавить сотрудника",
+        "employeeNo": "Табельный №",
+        "firstName": "Имя",
+        "lastName": "Фамилия",
+        "patronymic": "Отчество",
+        "department": "Отдел",
+        "position": "Должность",
+        "create": "Создать",
+        "noEmployees": "Нет сотрудников",
+        "col": {
+            "employeeNo": "Табельный №",
+            "lastName": "Фамилия",
+            "firstName": "Имя",
+            "patronymic": "Отчество",
+            "department": "Отдел",
+            "position": "Должность",
+            "status": "Статус"
+        }
+    },
+    "devices": {
+        "title": "Устройства",
+        "addDevice": "Добавить устройство",
+        "name": "Название",
+        "code": "Код",
+        "host": "IP Адрес",
+        "type": "Тип",
+        "location": "Расположение",
+        "apiKey": "API Ключ",
+        "create": "Создать",
+        "noDevices": "Нет устройств",
+        "col": {
+            "name": "Название",
+            "code": "Код",
+            "host": "IP",
+            "type": "Тип",
+            "location": "Расположение",
+            "status": "Статус"
+        }
+    },
+    "reports": {
+        "title": "Отчёты",
+        "period": "Период",
+        "today": "Сегодня",
+        "yesterday": "Вчера",
+        "thisWeek": "Эта неделя",
+        "thisMonth": "Этот месяц",
+        "exportCsv": "Экспорт CSV",
+        "exportPdf": "Экспорт PDF",
+        "dailySummary": "Дневная сводка",
+        "metric": "Метрика",
+        "count": "Кол-во",
+        "metrics": {
+            "turnstileIn": "Вход через турникет",
+            "turnstileOut": "Выход через турникет",
+            "esmoOk": "ЭСМО ОК",
+            "esmoFail": "ЭСМО ОТКАЗ",
+            "toolTakes": "Выдача инструментов",
+            "toolReturns": "Возврат инструментов",
+            "mineIn": "Вход в шахту",
+            "mineOut": "Выход из шахты",
+            "blocked": "Заблокировано"
+        }
+    },
+    "adminUsers": {
+        "title": "Управление пользователями",
+        "col": {
+            "id": "ID",
+            "username": "Логин",
+            "role": "Роль",
+            "status": "Статус"
+        }
+    },
+    "topbar": {
+        "search": "Поиск сотрудников, устройств…",
+        "theme": "Сменить тему",
+        "language": "Язык"
+    },
+    "status": {
+        "ok": "ОК",
+        "accepted": "Принято",
+        "rejected": "Отклонено",
+        "blocked": "Заблокировано",
+        "warning": "Предупр.",
+        "online": "Онлайн",
+        "offline": "Оффлайн",
+        "pending": "Ожидание",
+        "duplicate": "Дубликат",
+        "error": "Ошибка",
+        "fail": "Отказ"
+    },
+    "common": {
+        "noData": "—"
+    }
+}

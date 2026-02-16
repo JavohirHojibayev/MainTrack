@@ -1,0 +1,8 @@
+{
+  "backend_url": "http://127.0.0.1:8000",
+  "api_key": "CHANGE_ME",
+  "device_code": "TURNSTILE-1",
+  "events_file": "events.json",
+  "sqlite_path": "buffer.db",
+  "batch_size": 50
+}
