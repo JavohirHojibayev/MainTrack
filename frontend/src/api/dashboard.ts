@@ -26,3 +26,20 @@ export async function fetchBlockedAttempts(): Promise<BlockedRow[]> {
     if (apiClient.useMocks) return mocks.mockBlocked;
     return apiClient.get("/reports/blocked-attempts");
 }
+
+export interface DailySummaryRow {
+    employee_no: string;
+    full_name: string;
+    total_minutes: number;
+    last_in: string | null;
+    last_out: string | null;
+    is_inside: boolean;
+}
+
+export async function fetchDailyMineSummary(day: string): Promise<DailySummaryRow[]> {
+    return apiClient.get(`/reports/daily-mine-summary?day=${day}`);
+}
+
+export async function fetchEsmoSummary(day: string): Promise<number> {
+    return apiClient.get(`/reports/esmo-summary?day=${day}`);
+}

@@ -143,3 +143,51 @@ class HikvisionClient:
 
         logger.info("Fetched %d events from %s", len(all_events), self.name)
         return all_events
+
+    def fetch_all_users(self) -> list[dict]:
+        """
+        Fetch all users from the device (read-only search).
+        POST /ISAPI/AccessControl/UserInfo/Search?format=json
+        """
+        all_users: list[dict] = []
+        search_position = 0
+        max_results = 30
+
+        while True:
+            body = {
+                "UserInfoSearchCond": {
+                    "searchID": "minetrack_user_sync",
+                    "searchResultPosition": search_position,
+                    "maxResults": max_results
+                }
+            }
+
+            resp = self._post_search(
+                "/ISAPI/AccessControl/UserInfo/Search?format=json",
+                body,
+            )
+
+            if resp is None:
+                break
+
+            try:
+                data = resp.json()
+            except (json.JSONDecodeError, ValueError):
+                logger.warning("Invalid JSON from UserInfo search")
+                break
+
+            user_search = data.get("UserInfoSearch", {})
+            total_matches = user_search.get("totalMatches", 0)
+            user_info = user_search.get("UserInfo", [])
+
+            if not user_info:
+                break
+
+            all_users.extend(user_info)
+            search_position += len(user_info)
+
+            if search_position >= total_matches:
+                break
+        
+        logger.info("Fetched %d users from %s", len(all_users), self.name)
+        return all_users

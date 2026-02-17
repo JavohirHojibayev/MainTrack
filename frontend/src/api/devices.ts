@@ -30,3 +30,7 @@ export async function fetchDevices(): Promise<Device[]> {
 export async function createDevice(data: DeviceCreate): Promise<Device> {
     return apiClient.post("/devices", data);
 }
+
+export async function syncHikvisionUsers(): Promise<any> {
+    return apiClient.post("/hikvision/sync-users");
+}

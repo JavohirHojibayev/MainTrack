@@ -23,3 +23,6 @@ class MineWorkSummaryItem(BaseModel):
     employee_no: str
     full_name: str
     total_minutes: int
+    last_in: datetime | None = None
+    last_out: datetime | None = None
+    is_inside: bool = False

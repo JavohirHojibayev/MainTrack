@@ -33,7 +33,13 @@ export default function EventsPage() {
 
     return (
         <Box>
-            <Typography variant="h4" sx={{ mb: 3 }}>{t("events.title")}</Typography>
+            <Typography variant="h4" sx={{
+                mb: 3,
+                background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                display: "inline-block"
+            }}>{t("events.title")}</Typography>
             <GlassCard sx={{ mb: 3, p: 2 }}>
                 <Grid container spacing={2} alignItems="center">
                     <Grid item xs={12} sm={6} md={2}><TextField label={t("events.dateFrom")} type="datetime-local" fullWidth InputLabelProps={{ shrink: true }} onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value ? new Date(e.target.value).toISOString() : undefined }))} /></Grid>

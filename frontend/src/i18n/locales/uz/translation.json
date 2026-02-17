@@ -35,7 +35,12 @@
         "reason": "Sabab",
         "noData": "Ma'lumot yo'q",
         "noDebts": "Qarz yo'q",
-        "clear": "Toza"
+        "clear": "Tozalash",
+        "dailyActivity": "Kunlik faoliyat",
+        "status": "Holat",
+        "entered": "Kirgan",
+        "exited": "Chiqqan",
+        "duration": "Davomiyligi"
     },
     "events": {
         "title": "Hodisalar jurnali",
@@ -79,7 +84,8 @@
             "patronymic": "Otasining ismi",
             "department": "Bo'lim",
             "position": "Lavozim",
-            "status": "Holat"
+            "status": "Holat",
+            "fullName": "F.I.O."
         }
     },
     "devices": {

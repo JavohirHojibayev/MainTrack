@@ -35,7 +35,12 @@
         "reason": "Причина",
         "noData": "Нет данных",
         "noDebts": "Нет задолженностей",
-        "clear": "Чисто"
+        "clear": "Очистить",
+        "dailyActivity": "Ежедневная активность",
+        "status": "Статус",
+        "entered": "Вошел",
+        "exited": "Вышел",
+        "duration": "Длительность"
     },
     "events": {
         "title": "Журнал событий",
@@ -79,7 +84,8 @@
             "patronymic": "Отчество",
             "department": "Отдел",
             "position": "Должность",
-            "status": "Статус"
+            "status": "Статус",
+            "fullName": "ФИО"
         }
     },
     "devices": {

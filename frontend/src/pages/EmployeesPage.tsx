@@ -1,60 +1,76 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Box, Typography, TextField, Button, Grid, Table, TableBody, TableCell, TableHead, TableRow } from "@mui/material";
+import { Box, Typography, Button, Table, TableBody, TableCell, TableHead, TableRow, CircularProgress } from "@mui/material";
 import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
-import { fetchEmployees, createEmployee, type Employee, type EmployeeCreate } from "@/api/employees";
+import { fetchEmployees, type Employee } from "@/api/employees";
+import { syncHikvisionUsers } from "@/api/devices";
 import { useAppTheme } from "@/context/ThemeContext";
-
-const emptyForm: EmployeeCreate = { employee_no: "", first_name: "", last_name: "", patronymic: "", department: "", position: "" };
 
 export default function EmployeesPage() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
     const [employees, setEmployees] = useState<Employee[]>([]);
-    const [form, setForm] = useState<EmployeeCreate>(emptyForm);
+    const [syncing, setSyncing] = useState(false);
 
     const load = () => { fetchEmployees().then(setEmployees).catch(() => { }); };
     useEffect(() => { load(); }, []);
 
-    const handleSubmit = async (e: FormEvent) => {
-        e.preventDefault();
-        try { await createEmployee(form); setForm(emptyForm); load(); } catch (err) { console.error(err); }
+    const handleSync = async () => {
+        setSyncing(true);
+        try {
+            const res = await syncHikvisionUsers();
+            if (res.success) {
+                alert(res.message);
+                load();
+            } else {
+                alert("Sync failed: " + res.message);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Sync error");
+        } finally {
+            setSyncing(false);
+        }
     };
 
     return (
-        <Box>
-            <Typography variant="h4" sx={{ mb: 3 }}>{t("employees.title")}</Typography>
-            <GlassCard sx={{ mb: 3 }}>
-                <Typography variant="h6" sx={{ mb: 2 }}>{t("employees.addEmployee")}</Typography>
-                <Box component="form" onSubmit={handleSubmit}>
-                    <Grid container spacing={2}>
-                        <Grid item xs={12} sm={6} md={2}><TextField label={t("employees.employeeNo")} required fullWidth value={form.employee_no} onChange={(e) => setForm((f) => ({ ...f, employee_no: e.target.value }))} /></Grid>
-                        <Grid item xs={12} sm={6} md={2}><TextField label={t("employees.firstName")} required fullWidth value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} /></Grid>
-                        <Grid item xs={12} sm={6} md={2}><TextField label={t("employees.lastName")} required fullWidth value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} /></Grid>
-                        <Grid item xs={12} sm={6} md={2}><TextField label={t("employees.patronymic")} fullWidth value={form.patronymic ?? ""} onChange={(e) => setForm((f) => ({ ...f, patronymic: e.target.value || null }))} /></Grid>
-                        <Grid item xs={12} sm={6} md={2}><TextField label={t("employees.department")} fullWidth value={form.department ?? ""} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value || null }))} /></Grid>
-                        <Grid item xs={12} sm={6} md={2}><Button type="submit" variant="contained" fullWidth sx={{ height: 40 }}>{t("employees.create")}</Button></Grid>
-                    </Grid>
-                </Box>
-            </GlassCard>
-            <GlassCard>
+        <Box sx={{ p: 2 }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
+                <Typography variant="h4" sx={{
+                    background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    display: "inline-block"
+                }}>{t("employees.title")}</Typography>
+                <Button
+                    variant="outlined"
+                    onClick={handleSync}
+                    disabled={syncing}
+                    startIcon={syncing ? <CircularProgress size={20} /> : null}
+                >
+                    {syncing ? "Syncing..." : "Sync from Turnstile"}
+                </Button>
+            </Box>
+
+            <GlassCard sx={{ width: "fit-content", minWidth: 650 }}>
                 <Table size="small">
                     <TableHead>
                         <TableRow>
-                            <TableCell>{t("employees.col.employeeNo")}</TableCell><TableCell>{t("employees.col.lastName")}</TableCell><TableCell>{t("employees.col.firstName")}</TableCell>
-                            <TableCell>{t("employees.col.patronymic")}</TableCell><TableCell>{t("employees.col.department")}</TableCell><TableCell>{t("employees.col.position")}</TableCell><TableCell>{t("employees.col.status")}</TableCell>
+                            <TableCell sx={{ width: "120px" }}>{t("employees.col.employeeNo")}</TableCell>
+                            <TableCell sx={{ width: "350px" }}>{t("employees.col.fullName")}</TableCell>
+                            <TableCell sx={{ width: "100px", textAlign: "center" }}>{t("employees.col.status")}</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
                         {employees.map((e) => (
                             <TableRow key={e.id}>
-                                <TableCell>{e.employee_no}</TableCell><TableCell>{e.last_name}</TableCell><TableCell>{e.first_name}</TableCell>
-                                <TableCell>{e.patronymic ?? "—"}</TableCell><TableCell>{e.department ?? "—"}</TableCell><TableCell>{e.position ?? "—"}</TableCell>
-                                <TableCell><StatusPill status={e.is_active ? "OK" : "OFFLINE"} /></TableCell>
+                                <TableCell>{e.employee_no}</TableCell>
+                                <TableCell>{`${e.last_name} ${e.first_name} ${e.patronymic || ""}`.trim()}</TableCell>
+                                <TableCell sx={{ textAlign: "center" }}><StatusPill status={e.is_active ? "OK" : "OFFLINE"} /></TableCell>
                             </TableRow>
                         ))}
-                        {employees.length === 0 && <TableRow><TableCell colSpan={7} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("employees.noEmployees")}</TableCell></TableRow>}
+                        {employees.length === 0 && <TableRow><TableCell colSpan={3} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("employees.noEmployees")}</TableCell></TableRow>}
                     </TableBody>
                 </Table>
             </GlassCard>

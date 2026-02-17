@@ -25,9 +25,13 @@ export default function DevicesPage() {
 
     return (
         <Box>
-            <Typography variant="h4" sx={{ mb: 3 }}>{t("devices.title")}</Typography>
-            <GlassCard sx={{ mb: 3 }}>
-                <Typography variant="h6" sx={{ mb: 2 }}>{t("devices.addDevice")}</Typography>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
+                <Typography variant="h4" sx={{
+                    background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    display: "inline-block"
+                }}>{t("devices.title")}</Typography>
                 <Box component="form" onSubmit={handleSubmit}>
                     <Grid container spacing={2}>
                         <Grid item xs={12} sm={6} md={2}><TextField label={t("devices.name")} required fullWidth value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></Grid>

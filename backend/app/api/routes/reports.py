@@ -113,19 +113,38 @@ def daily_mine_summary(
         .all()
     )
 
-    summary: dict[int, int] = {}
+    summary: dict[int, dict] = {}
     current_in: dict[int, datetime] = {}
 
     for ev in events:
+        emp_id = ev.employee_id
+        if emp_id not in summary:
+            summary[emp_id] = {
+                "total_minutes": 0,
+                "last_in": None,
+                "last_out": None,
+                "is_inside": False
+            }
+        
+        entry = summary[emp_id]
+
         if ev.event_type == EventType.MINE_IN:
             if start <= ev.event_ts < end:
-                current_in[ev.employee_id] = ev.event_ts
+                current_in[emp_id] = ev.event_ts
+                entry["last_in"] = ev.event_ts
+                entry["is_inside"] = True
         elif ev.event_type == EventType.MINE_OUT:
-            if ev.employee_id in current_in:
-                in_ts = current_in.pop(ev.employee_id)
+            entry["last_out"] = ev.event_ts
+            entry["is_inside"] = False
+            if emp_id in current_in:
+                in_ts = current_in.pop(emp_id)
                 duration = ev.event_ts - in_ts
                 minutes = int(duration.total_seconds() // 60)
-                summary[ev.employee_id] = summary.get(ev.employee_id, 0) + max(minutes, 0)
+                entry["total_minutes"] += max(minutes, 0)
+
+    # For those still inside, calculate duration until now (if today)
+    for emp_id, in_ts in current_in.items():
+        pass # Do not calculate duration for active sessions
 
     if not summary:
         return []
@@ -134,7 +153,7 @@ def daily_mine_summary(
     by_id = {emp.id: emp for emp in employees}
 
     result: list[MineWorkSummaryItem] = []
-    for emp_id, total_minutes in summary.items():
+    for emp_id, data in summary.items():
         emp = by_id.get(emp_id)
         if not emp:
             continue
@@ -144,7 +163,10 @@ def daily_mine_summary(
                 employee_id=emp.id,
                 employee_no=emp.employee_no,
                 full_name=full_name,
-                total_minutes=total_minutes,
+                total_minutes=data["total_minutes"],
+                last_in=data["last_in"],
+                last_out=data["last_out"],
+                is_inside=data["is_inside"],
             )
         )
     return result
@@ -177,3 +199,25 @@ def blocked_attempts(
             }
         )
     return result
+
+
+@router.get("/esmo-summary", response_model=int)
+def esmo_summary(
+    day: date = Query(..., description="YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
+) -> int:
+    start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+    end = start + timedelta(days=1)
+
+    count = (
+        db.query(func.count(func.distinct(Event.employee_id)))
+        .filter(
+            Event.status == EventStatus.ACCEPTED,
+            Event.event_type == EventType.ESMO_OK,
+            Event.event_ts >= start,
+            Event.event_ts < end,
+        )
+        .scalar()
+    )
+    return count or 0

@@ -15,6 +15,7 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Any
+import re
 
 from fastapi import APIRouter, Body, Depends, Request, Response
 from sqlalchemy.exc import IntegrityError
@@ -33,12 +34,6 @@ router = APIRouter()
 
 
 # ─── Webhook Receiver (no auth — called by turnstile devices) ─────────
-
-# ... (helper functions remain the same) ...
-# I will NOT include helper functions in ReplacementContent to rely on existing context,
-# but replace_file_content requires exact context matching.
-# I will target the imports and the route definition separately or use multi_replace.
-
 
 def _get_or_create_device_by_ip(db, ip: str, mac: str = "") -> Device | None:
     """Find or create a device record by IP address."""
@@ -101,12 +96,32 @@ def _find_employee(db, employee_no: str) -> Employee | None:
     return db.query(Employee).filter(Employee.employee_no == employee_no).first()
 
 
+def _flatten_hikvision_json(data: dict) -> dict:
+    """Flatten nested Hikvision JSON structure to match XML output."""
+    ace = data.get("AccessControllerEvent", {})
+    return {
+        "ipAddress": data.get("ipAddress"),
+        "macAddress": data.get("macAddress"),
+        "dateTime": data.get("dateTime"),
+        "eventType": data.get("eventType"),
+        "eventState": data.get("eventState"),
+        "eventDescription": data.get("eventDescription"),
+        # Flattened fields from AccessControllerEvent
+        "employeeNoString": ace.get("employeeNoString", ace.get("employeeNo")),
+        "cardNo": ace.get("cardNo"),
+        "cardReaderNo": str(ace.get("cardReaderNo", "")),
+        "doorNo": str(ace.get("doorNo", "")),
+        "serialNo": str(ace.get("serialNo", "")),
+        "currentVerifyMode": ace.get("currentVerifyMode"),
+    }
+
+
 def _parse_event_xml(xml_body: str) -> dict | None:
     """Parse Hikvision EventNotificationAlert XML into a dict."""
     try:
         root = ET.fromstring(xml_body)
     except ET.ParseError as exc:
-        logger.warning("XML parse error: %s", exc)
+        logger.warning("XML parse error: %s. Body: %r", exc, xml_body)
         return None
 
     # Remove namespace prefixes for easier access
@@ -193,11 +208,62 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
     xml_str = body.decode("utf-8", errors="replace")
 
     logger.info("Webhook received (%d bytes) from %s", len(body), request.client.host if request.client else "unknown")
+    print(f"DEBUG: Webhook received from {request.client.host if request.client else 'unknown'}")
 
-    # Parse the XML notification
-    event_data = _parse_event_xml(xml_str)
+    # Try to parse as JSON first (or JSON inside multipart)
+    json_data = None
+    
+    # 1. Try direct JSON
+    try:
+        json_data = json.loads(xml_str)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Try simple regex (non-greedy)
+    if not json_data:
+        # Look for a clean JSON block containing "AccessControllerEvent"
+        match = re.search(r'(\{.*?"AccessControllerEvent":.*?\})', xml_str, re.DOTALL)
+        if match:
+            try:
+                json_data = json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+    # 3. Try splitting by boundary (heuristic)
+    if not json_data and "--" in xml_str:
+        # Hikvision often uses "--MIME_boundary" or similar
+        # We split by any line starting with --
+        parts = re.split(r'\r?\n--', xml_str)
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Find first { and last }
+            start = part.find("{")
+            end = part.rfind("}")
+            if start != -1 and end != -1:
+                candidate = part[start:end+1]
+                try:
+                    json_data = json.loads(candidate)
+                    if "AccessControllerEvent" in json_data or "eventType" in json_data:
+                        break
+                    else:
+                        json_data = None # Not the event payload
+                except json.JSONDecodeError:
+                    continue
+
+    if json_data:
+        event_data = _flatten_hikvision_json(json_data)
+    else:
+        # 4. Fallback to XML
+        event_data = _parse_event_xml(xml_str)
+        
+    print(f"DEBUG: Parsed event_data: {event_data}")
+
     if not event_data:
-        logger.warning("Could not parse webhook XML")
+        # Log limited preview of body to avoid binary dump
+        preview = xml_str[:1000].replace('\r', '').replace('\n', ' ') + "..." if len(xml_str) > 1000 else xml_str
+        logger.warning("Could not parse webhook payload. Body preview: %s", preview)
         return Response(status_code=200, content="OK")
 
     # Only process AccessControllerEvent
@@ -234,16 +300,20 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
         # Find employee
         employee = _find_employee(db, employee_no)
         if not employee:
-            logger.debug("Employee not found for ID: %s", employee_no)
+            logger.warning("Employee not found for ID: %s", employee_no)
+            print(f"DEBUG: Employee not found for ID: {employee_no}")
             # Still save the event with a log, but skip if no employee
             return Response(status_code=200, content="OK")
 
         # Create event
+        # FORCE SERVER TIME (User request: turnstile time is wrong/unreliable)
+        server_now = datetime.now(timezone(timedelta(hours=5)))
+        
         event = Event(
             device_id=device.id,
             employee_id=employee.id,
             event_type=_determine_direction(event_data),
-            event_ts=_parse_hikvision_time(event_time),
+            event_ts=server_now, # _parse_hikvision_time(event_time),
             raw_id=raw_id,
             status=EventStatus.ACCEPTED,
             source_payload=event_data,
@@ -251,11 +321,13 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
         db.add(event)
         db.commit()
         logger.info(
-            "Saved event: employee=%s, type=%s, device=%s",
+            "Saved event: employee=%s, type=%s, device=%s, ts=%s",
             employee_no,
             event.event_type.value,
             ip_address,
+            server_now,
         )
+        print(f"DEBUG: Saved event for {employee_no} at {server_now}")
     except IntegrityError:
         db.rollback()
     except Exception as exc:
@@ -308,6 +380,7 @@ def hikvision_status(_: Any = Depends(get_current_user)) -> dict:
                 "registered": db_device is not None,
                 "event_count": event_count,
                 "last_event": last_event,
+                "last_seen": db_device.last_seen.isoformat() if db_device and db_device.last_seen else None,
             })
 
         return {
@@ -316,5 +389,95 @@ def hikvision_status(_: Any = Depends(get_current_user)) -> dict:
             "total": len(devices),
             "devices": device_statuses,
         }
+    finally:
+        db.close()
+
+
+@router.post("/sync-users")
+def start_user_sync(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Manually trigger synchronization of users from Hikvision turnstiles.
+    Fetches all users from the first configured device and adds missing ones to DB.
+    """
+    # Only admins/dispatchers/etc can sync
+    if current_user.role not in ("superadmin", "admin", "dispatcher"):
+        return Response(status_code=403, content="Not authorized")
+
+    try:
+        devices = json.loads(settings.HIKVISION_DEVICES)
+    except:
+        return {"success": False, "message": "Invalid device config"}
+
+    if not devices:
+        return {"success": False, "message": "No devices configured"}
+
+    # Use first device for sync
+    device_conf = devices[0]
+    host = device_conf.get("host")
+    
+    from app.core.hikvision_client import HikvisionClient
+    
+    client = HikvisionClient(
+        host=host,
+        user=settings.HIKVISION_USER,
+        password=settings.HIKVISION_PASS
+    )
+
+    if not client.check_connection():
+         return {"success": False, "message": f"Could not connect to turnstile {host}"}
+
+    users = client.fetch_all_users()
+    logger.info("Sync found %d users on device", len(users))
+
+    db = SessionLocal()
+    added_count = 0
+    skipped_count = 0
+    
+    try:
+        for u in users:
+            emp_no = u.get("employeeNo")
+            name = u.get("name", "")
+            
+            if not emp_no:
+                continue
+
+            # Check if exists
+            existing = db.query(Employee).filter(Employee.employee_no == emp_no).first()
+            if existing:
+                skipped_count += 1
+                continue
+
+            # Create new employee
+            # Parse name: "Last First Middle"
+            parts = name.split()
+            last_name = parts[0] if len(parts) > 0 else "Unknown"
+            first_name = parts[1] if len(parts) > 1 else ""
+            patronymic = " ".join(parts[2:]) if len(parts) > 2 else ""
+
+            new_emp = Employee(
+                employee_no=emp_no,
+                first_name=first_name,
+                last_name=last_name,
+                patronymic=patronymic,
+                position="Synced from Turnstile",
+                department="General",
+                is_active=True
+            )
+            db.add(new_emp)
+            added_count += 1
+
+        db.commit()
+        return {
+            "success": True,
+            "message": f"Sync complete. Added {added_count} new employees.",
+            "total_on_device": len(users),
+            "added": added_count,
+            "skipped": skipped_count
+        }
+    except Exception as e:
+        logger.error("Sync failed: %s", e)
+        return {"success": False, "message": str(e)}
     finally:
         db.close()

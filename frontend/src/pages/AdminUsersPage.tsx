@@ -16,7 +16,13 @@ export default function AdminUsersPage() {
     const { t } = useTranslation();
     return (
         <Box>
-            <Typography variant="h4" sx={{ mb: 3 }}>{t("adminUsers.title")}</Typography>
+            <Typography variant="h4" sx={{
+                mb: 3,
+                background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                display: "inline-block"
+            }}>{t("adminUsers.title")}</Typography>
             <GlassCard>
                 <Table size="small">
                     <TableHead>

@@ -8,7 +8,7 @@ import BlockIcon from "@mui/icons-material/BlockRounded";
 import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { useAppTheme } from "@/context/ThemeContext";
-import { fetchInsideMine, fetchToolDebts, fetchBlockedAttempts, type InsideMineRow, type ToolDebtRow, type BlockedRow } from "@/api/dashboard";
+import { fetchDailyMineSummary, fetchToolDebts, fetchBlockedAttempts, fetchEsmoSummary, type DailySummaryRow, type ToolDebtRow, type BlockedRow } from "@/api/dashboard";
 
 function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number; color: string }) {
     const { tokens } = useAppTheme();
@@ -23,68 +23,114 @@ function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: 
     );
 }
 
-function fmt(iso: string) {
+function fmt(iso: string | null) {
+    if (!iso) return "—";
     try { return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); } catch { return iso; }
+}
+
+function dur(min: number) {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return `${h}h ${m}m`;
 }
 
 export default function DashboardPage() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
-    const [inside, setInside] = useState<InsideMineRow[]>([]);
+    const [summary, setSummary] = useState<DailySummaryRow[]>([]);
     const [debts, setDebts] = useState<ToolDebtRow[]>([]);
     const [blocked, setBlocked] = useState<BlockedRow[]>([]);
+    const [esmoCount, setEsmoCount] = useState(0);
 
     useEffect(() => {
-        fetchInsideMine().then(setInside).catch(() => { });
-        fetchToolDebts().then(setDebts).catch(() => { });
-        fetchBlockedAttempts().then(setBlocked).catch(() => { });
+        const load = () => {
+            const d = new Date();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const today = `${year}-${month}-${day}`;
+
+            fetchDailyMineSummary(today).then(setSummary).catch(() => { });
+            fetchToolDebts().then(setDebts).catch(() => { });
+            fetchBlockedAttempts().then(setBlocked).catch(() => { });
+            fetchEsmoSummary(today).then(setEsmoCount).catch(() => { });
+        };
+        load();
+        const interval = setInterval(load, 30000);
+        return () => clearInterval(interval);
     }, []);
+
+    const insideCount = summary.filter(r => r.is_inside).length;
 
     return (
         <Box>
-            <Typography variant="h4" sx={{ mb: 3 }}>{t("dashboard.title")}</Typography>
+            <Typography variant="h4" sx={{
+                mb: 3,
+                background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                display: "inline-block" // Ensure gradient applies correctly
+            }}>{t("dashboard.title")}</Typography>
             <Grid container spacing={2} sx={{ mb: 3 }}>
-                <Grid item xs={12} sm={6} md={3}><KpiCard icon={<PeopleIcon />} label={t("dashboard.insideMine")} value={inside.length} color={tokens.status.ok} /></Grid>
-                <Grid item xs={12} sm={6} md={3}><KpiCard icon={<MedicalIcon />} label={t("dashboard.esmoOkToday")} value={inside.length} color={tokens.brand.secondary} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><KpiCard icon={<PeopleIcon />} label={t("dashboard.insideMine")} value={insideCount} color={tokens.status.ok} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><KpiCard icon={<MedicalIcon />} label={t("dashboard.esmoOkToday")} value={esmoCount} color={tokens.brand.secondary} /></Grid>
                 <Grid item xs={12} sm={6} md={3}><KpiCard icon={<BuildIcon />} label={t("dashboard.toolDebts")} value={debts.length} color={tokens.status.warning} /></Grid>
                 <Grid item xs={12} sm={6} md={3}><KpiCard icon={<BlockIcon />} label={t("dashboard.blockedAttempts")} value={blocked.length} color={tokens.status.blocked} /></Grid>
             </Grid>
             <Grid container spacing={2}>
-                <Grid item xs={12} md={4}>
+                <Grid item xs={12} md={8}>
                     <GlassCard>
-                        <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.insideMine")}</Typography>
+                        <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.dailyActivity")}</Typography>
                         <Table size="small">
-                            <TableHead><TableRow><TableCell>{t("dashboard.employee")}</TableCell><TableCell>{t("dashboard.name")}</TableCell><TableCell>{t("dashboard.in")}</TableCell></TableRow></TableHead>
+                            <TableHead>
+                                <TableRow>
+                                    <TableCell>{t("dashboard.employee")}</TableCell>
+                                    <TableCell>{t("dashboard.name")}</TableCell>
+                                    <TableCell>{t("dashboard.status")}</TableCell>
+                                    <TableCell>{t("dashboard.entered")}</TableCell>
+                                    <TableCell>{t("dashboard.exited")}</TableCell>
+                                    <TableCell>{t("dashboard.duration")}</TableCell>
+                                </TableRow>
+                            </TableHead>
                             <TableBody>
-                                {inside.map((r) => <TableRow key={r.employee_no}><TableCell>{r.employee_no}</TableCell><TableCell>{r.full_name}</TableCell><TableCell>{fmt(r.last_in)}</TableCell></TableRow>)}
-                                {inside.length === 0 && <TableRow><TableCell colSpan={3} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.noData")}</TableCell></TableRow>}
+                                {summary.map((r) => (
+                                    <TableRow key={r.employee_no}>
+                                        <TableCell>{r.employee_no}</TableCell>
+                                        <TableCell>{r.full_name}</TableCell>
+                                        <TableCell><StatusPill status={r.is_inside ? "INSIDE" : "OUTSIDE"} /></TableCell>
+                                        <TableCell>{fmt(r.last_in)}</TableCell>
+                                        <TableCell>{fmt(r.last_out)}</TableCell>
+                                        <TableCell>{dur(r.total_minutes)}</TableCell>
+                                    </TableRow>
+                                ))}
+                                {summary.length === 0 && <TableRow><TableCell colSpan={6} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.noData")}</TableCell></TableRow>}
                             </TableBody>
                         </Table>
                     </GlassCard>
                 </Grid>
                 <Grid item xs={12} md={4}>
-                    <GlassCard>
-                        <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.toolDebts")}</Typography>
-                        <Table size="small">
-                            <TableHead><TableRow><TableCell>{t("dashboard.employee")}</TableCell><TableCell>{t("dashboard.name")}</TableCell><TableCell>{t("dashboard.taken")}</TableCell></TableRow></TableHead>
-                            <TableBody>
-                                {debts.map((r) => <TableRow key={r.employee_no}><TableCell>{r.employee_no}</TableCell><TableCell>{r.full_name}</TableCell><TableCell>{fmt(r.last_take)}</TableCell></TableRow>)}
-                                {debts.length === 0 && <TableRow><TableCell colSpan={3} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.noDebts")}</TableCell></TableRow>}
-                            </TableBody>
-                        </Table>
-                    </GlassCard>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                    <GlassCard>
-                        <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.blockedAttempts")}</Typography>
-                        <Table size="small">
-                            <TableHead><TableRow><TableCell>{t("dashboard.type")}</TableCell><TableCell>{t("dashboard.time")}</TableCell><TableCell>{t("dashboard.reason")}</TableCell></TableRow></TableHead>
-                            <TableBody>
-                                {blocked.map((r, i) => <TableRow key={i}><TableCell><StatusPill status={r.event_type} /></TableCell><TableCell>{fmt(r.event_ts)}</TableCell><TableCell sx={{ color: tokens.status.blocked }}>{r.reject_reason}</TableCell></TableRow>)}
-                                {blocked.length === 0 && <TableRow><TableCell colSpan={3} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.clear")}</TableCell></TableRow>}
-                            </TableBody>
-                        </Table>
-                    </GlassCard>
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <GlassCard>
+                            <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.toolDebts")}</Typography>
+                            <Table size="small">
+                                <TableHead><TableRow><TableCell>{t("dashboard.employee")}</TableCell><TableCell>{t("dashboard.taken")}</TableCell></TableRow></TableHead>
+                                <TableBody>
+                                    {debts.map((r) => <TableRow key={r.employee_no}><TableCell>{r.full_name}</TableCell><TableCell>{fmt(r.last_take)}</TableCell></TableRow>)}
+                                    {debts.length === 0 && <TableRow><TableCell colSpan={2} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.noDebts")}</TableCell></TableRow>}
+                                </TableBody>
+                            </Table>
+                        </GlassCard>
+                        <GlassCard>
+                            <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.blockedAttempts")}</Typography>
+                            <Table size="small">
+                                <TableHead><TableRow><TableCell>{t("dashboard.time")}</TableCell><TableCell>{t("dashboard.reason")}</TableCell></TableRow></TableHead>
+                                <TableBody>
+                                    {blocked.slice(0, 5).map((r, i) => <TableRow key={i}><TableCell>{fmt(r.event_ts)}</TableCell><TableCell sx={{ color: tokens.status.blocked }}>{r.reject_reason}</TableCell></TableRow>)}
+                                    {blocked.length === 0 && <TableRow><TableCell colSpan={2} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.clear")}</TableCell></TableRow>}
+                                </TableBody>
+                            </Table>
+                        </GlassCard>
+                    </Box>
                 </Grid>
             </Grid>
         </Box>

@@ -17,7 +17,14 @@ export default function ReportsPage() {
 
     return (
         <Box>
-            <Typography variant="h4" sx={{ mb: 3 }}>{t("reports.title")}</Typography>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
+                <Typography variant="h4" sx={{
+                    background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    display: "inline-block"
+                }}>{t("reports.title")}</Typography>
+            </Box>
             <GlassCard sx={{ mb: 3 }}>
                 <Grid container spacing={2} alignItems="center">
                     <Grid item xs={12} sm={4} md={3}>

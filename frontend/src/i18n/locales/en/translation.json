@@ -35,7 +35,12 @@
         "reason": "Reason",
         "noData": "No data",
         "noDebts": "No debts",
-        "clear": "Clear"
+        "clear": "Clear",
+        "dailyActivity": "Daily Activity",
+        "status": "Status",
+        "entered": "Entered",
+        "exited": "Exited",
+        "duration": "Duration"
     },
     "events": {
         "title": "Event Journal",
@@ -79,7 +84,8 @@
             "patronymic": "Patronymic",
             "department": "Department",
             "position": "Position",
-            "status": "Status"
+            "status": "Status",
+            "fullName": "Full Name"
         }
     },
     "devices": {
