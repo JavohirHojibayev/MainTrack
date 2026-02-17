@@ -45,7 +45,7 @@ export default function DevicesPage() {
                         <Grid item xs={12} sm={6} md={2}><Button type="submit" variant="contained" fullWidth sx={{ height: 40 }}>{t("devices.create")}</Button></Grid>
                     </Grid>
                 </Box>
-            </GlassCard>
+            </Box>
             <GlassCard>
                 <Table size="small">
                     <TableHead>
