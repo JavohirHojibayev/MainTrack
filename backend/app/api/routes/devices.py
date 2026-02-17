@@ -15,7 +15,13 @@ router = APIRouter()
 
 @router.get("", response_model=list[DeviceOut])
 def list_devices(db: Session = Depends(get_db), _: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer"))) -> list[DeviceOut]:
-    return db.query(Device).order_by(Device.id).all()
+    try:
+        devices = db.query(Device).order_by(Device.id).all()
+        print(f"DEBUG: Found {len(devices)} devices")
+        return devices
+    except Exception as e:
+        print(f"DEBUG: Error listing devices: {e}")
+        raise
 
 
 @router.post("", response_model=DeviceOut)
@@ -29,6 +35,7 @@ def create_device(
     device = Device(
         name=payload.name,
         device_code=payload.device_code,
+        host=payload.host,
         device_type=payload.device_type,
         location=payload.location,
         api_key=api_key,

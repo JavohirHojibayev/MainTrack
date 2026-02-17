@@ -10,6 +10,9 @@ export interface EventRow {
     status: string;
     reject_reason: string | null;
     raw_id: string;
+    employee_no?: string;
+    first_name?: string;
+    last_name?: string;
 }
 
 export interface EventFilters {

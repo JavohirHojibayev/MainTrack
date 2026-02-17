@@ -38,6 +38,8 @@ export default function EmployeesPage() {
         <Box sx={{ p: 2 }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
                 <Typography variant="h4" sx={{
+                    fontSize: "2.5rem",
+                    fontWeight: 700,
                     background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
                     WebkitBackgroundClip: "text",
                     WebkitTextFillColor: "transparent",

@@ -45,5 +45,5 @@ async def device_status_worker():
         finally:
             db.close()
             
-        # Check every 5 minutes
-        await asyncio.sleep(300)
+        # Check every 1 minute
+        await asyncio.sleep(60)

@@ -66,6 +66,8 @@ export default function DashboardPage() {
         <Box>
             <Typography variant="h4" sx={{
                 mb: 3,
+                fontSize: "2.5rem",
+                fontWeight: 700,
                 background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",

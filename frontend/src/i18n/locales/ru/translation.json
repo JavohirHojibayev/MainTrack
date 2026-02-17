@@ -58,9 +58,11 @@
         "rawId": "Raw ID",
         "device": "Устройство",
         "col": {
-            "time": "Время",
+            "time": "Time",
             "type": "Тип",
             "employeeId": "ID сотр.",
+            "employeeNo": "Табельный №",
+            "name": "ФИО",
             "deviceId": "ID устр.",
             "status": "Статус",
             "reason": "Причина"

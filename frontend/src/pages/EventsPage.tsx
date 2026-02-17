@@ -20,12 +20,32 @@ export default function EventsPage() {
     const [selected, setSelected] = useState<EventRow | null>(null);
 
     const columns: GridColDef[] = [
-        { field: "event_ts", headerName: t("events.col.time"), width: 180, valueFormatter: (p) => { try { return new Date(p as string).toLocaleString("en-GB"); } catch { return p as string; } } },
-        { field: "event_type", headerName: t("events.col.type"), width: 140 },
-        { field: "employee_id", headerName: t("events.col.employeeId"), width: 120 },
-        { field: "device_id", headerName: t("events.col.deviceId"), width: 120 },
-        { field: "status", headerName: t("events.col.status"), width: 130, renderCell: (p) => <StatusPill status={p.value} /> },
-        { field: "reject_reason", headerName: t("events.col.reason"), flex: 1 },
+        {
+            field: "full_name",
+            headerName: t("events.col.name") || "Name",
+            width: 200,
+            hideable: false,
+            valueGetter: (value, row) => {
+                if (row && row.first_name && row.last_name) return `${row.last_name} ${row.first_name}`;
+                return "";
+            }
+        },
+        { field: "employee_no", headerName: t("events.col.employeeNo") || "Employee #", width: 120, hideable: false },
+        { field: "event_ts", headerName: t("events.col.time"), width: 180, hideable: false, valueFormatter: (p) => { try { return new Date(p as string).toLocaleString("en-GB"); } catch { return p as string; } } },
+        { field: "event_type", headerName: t("events.col.type"), width: 140, hideable: false },
+        { field: "device_id", headerName: t("events.col.deviceId"), width: 100, hideable: false },
+        {
+            field: "status",
+            headerName: t("events.col.status"),
+            width: 130,
+            hideable: false,
+            renderCell: (p) => {
+                const isMineIn = p.row.event_type === "MINE_IN";
+                const colorStatus = isMineIn && p.value === "ACCEPTED" ? "WARNING" : undefined;
+                return <StatusPill status={p.value} colorStatus={colorStatus} />;
+            }
+        },
+        { field: "reject_reason", headerName: t("events.col.reason"), flex: 1, hideable: false },
     ];
 
     const load = () => { setLoading(true); fetchEvents(filters).then(setRows).catch(() => { }).finally(() => setLoading(false)); };
@@ -35,6 +55,8 @@ export default function EventsPage() {
         <Box>
             <Typography variant="h4" sx={{
                 mb: 3,
+                fontSize: "2.5rem",
+                fontWeight: 700,
                 background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",

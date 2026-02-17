@@ -61,6 +61,8 @@
             "time": "Time",
             "type": "Type",
             "employeeId": "Employee ID",
+            "employeeNo": "Employee #",
+            "name": "Name",
             "deviceId": "Device ID",
             "status": "Status",
             "reason": "Reason"

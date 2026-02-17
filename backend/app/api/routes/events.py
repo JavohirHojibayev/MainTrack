@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.deps import get_db
@@ -301,6 +301,9 @@ def list_events(
     if status:
         query = query.filter(Event.status == status)
     if employee_no:
-        query = query.join(Employee).filter(Employee.employee_no == employee_no)
+        query = query.join(Employee).filter(Employee.employee_no.ilike(f"%{employee_no}%"))
+    
+    # Eager load employee for display
+    query = query.options(joinedload(Event.employee))
 
     return query.order_by(Event.event_ts.desc()).limit(limit).all()

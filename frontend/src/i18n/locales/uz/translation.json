@@ -61,6 +61,8 @@
             "time": "Vaqt",
             "type": "Tur",
             "employeeId": "Xodim ID",
+            "employeeNo": "Tabel №",
+            "name": "F.I.O.",
             "deviceId": "Qurilma ID",
             "status": "Holat",
             "reason": "Sabab"
