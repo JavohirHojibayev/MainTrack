@@ -7,6 +7,7 @@ import DarkModeIcon from "@mui/icons-material/DarkModeRounded";
 import LanguageIcon from "@mui/icons-material/LanguageRounded";
 import { useAppTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
+import { useLayout } from "./Layout";
 
 const LANGUAGES = [
     { code: "en", label: "EN" },
@@ -18,6 +19,7 @@ export default function TopBar() {
     const { t, i18n } = useTranslation();
     const { tokens, mode, toggleMode } = useAppTheme();
     const { user, logout } = useAuth();
+    const { searchQuery, setSearchQuery } = useLayout();
 
     const changeLang = (lng: string) => {
         i18n.changeLanguage(lng);
@@ -44,6 +46,8 @@ export default function TopBar() {
                 placeholder={t("topbar.search")}
                 size="small"
                 sx={{ width: 300 }}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 InputProps={{
                     startAdornment: (
                         <InputAdornment position="start">

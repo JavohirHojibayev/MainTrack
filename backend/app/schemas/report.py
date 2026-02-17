@@ -26,3 +26,15 @@ class MineWorkSummaryItem(BaseModel):
     last_in: datetime | None = None
     last_out: datetime | None = None
     is_inside: bool = False
+
+
+class ReportSummary(BaseModel):
+    turnstile_in: int
+    turnstile_out: int
+    esmo_ok: int
+    esmo_fail: int
+    tool_takes: int
+    tool_returns: int
+    mine_in: int
+    mine_out: int
+    blocked: int

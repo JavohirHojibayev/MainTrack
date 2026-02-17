@@ -110,6 +110,27 @@
             "status": "Status"
         }
     },
+    "adminUsers": {
+        "title": "User Management",
+        "createUser": "Create User",
+        "resetPassword": "Reset Password",
+        "resetPasswordShort": "Reset",
+        "username": "Username",
+        "password": "Password",
+        "role": "Role",
+        "save": "Save",
+        "cancel": "Cancel",
+        "confirmReset": "Reset Password for",
+        "newPassword": "New Password",
+        "delete": "Delete",
+        "col": {
+            "id": "ID",
+            "username": "Username",
+            "role": "Role",
+            "status": "Status",
+            "actions": "Actions"
+        }
+    },
     "reports": {
         "title": "Reports",
         "period": "Period",
@@ -132,15 +153,6 @@
             "mineIn": "Mine IN",
             "mineOut": "Mine OUT",
             "blocked": "Blocked Attempts"
-        }
-    },
-    "adminUsers": {
-        "title": "User Management",
-        "col": {
-            "id": "ID",
-            "username": "Username",
-            "role": "Role",
-            "status": "Status"
         }
     },
     "topbar": {

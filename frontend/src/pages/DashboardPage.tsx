@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Box, Grid, Typography, Table, TableBody, TableCell, TableHead, TableRow } from "@mui/material";
+import { Box, Grid, Typography, Table, TableBody, TableCell, TableHead, TableRow, TablePagination } from "@mui/material";
 import PeopleIcon from "@mui/icons-material/PeopleRounded";
 import MedicalIcon from "@mui/icons-material/MonitorHeartRounded";
 import BuildIcon from "@mui/icons-material/BuildRounded";
@@ -41,6 +41,14 @@ export default function DashboardPage() {
     const [debts, setDebts] = useState<ToolDebtRow[]>([]);
     const [blocked, setBlocked] = useState<BlockedRow[]>([]);
     const [esmoCount, setEsmoCount] = useState(0);
+    const [page, setPage] = useState(0);
+    const [rowsPerPage, setRowsPerPage] = useState(10);
+
+    // Side tables pagination
+    const [debtsPage, setDebtsPage] = useState(0);
+    const [debtsRowsPerPage, setDebtsRowsPerPage] = useState(5);
+    const [blockedPage, setBlockedPage] = useState(0);
+    const [blockedRowsPerPage, setBlockedRowsPerPage] = useState(5);
 
     useEffect(() => {
         const load = () => {
@@ -95,19 +103,33 @@ export default function DashboardPage() {
                                 </TableRow>
                             </TableHead>
                             <TableBody>
-                                {summary.map((r) => (
-                                    <TableRow key={r.employee_no}>
-                                        <TableCell>{r.employee_no}</TableCell>
-                                        <TableCell>{r.full_name}</TableCell>
-                                        <TableCell><StatusPill status={r.is_inside ? "INSIDE" : "OUTSIDE"} /></TableCell>
-                                        <TableCell>{fmt(r.last_in)}</TableCell>
-                                        <TableCell>{fmt(r.last_out)}</TableCell>
-                                        <TableCell>{dur(r.total_minutes)}</TableCell>
-                                    </TableRow>
-                                ))}
+                                {summary
+                                    .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                                    .map((r) => (
+                                        <TableRow key={r.employee_no}>
+                                            <TableCell>{r.employee_no}</TableCell>
+                                            <TableCell>{r.full_name}</TableCell>
+                                            <TableCell><StatusPill status={r.is_inside ? "INSIDE" : "OUTSIDE"} /></TableCell>
+                                            <TableCell>{fmt(r.last_in)}</TableCell>
+                                            <TableCell>{fmt(r.last_out)}</TableCell>
+                                            <TableCell>{dur(r.total_minutes)}</TableCell>
+                                        </TableRow>
+                                    ))}
                                 {summary.length === 0 && <TableRow><TableCell colSpan={6} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.noData")}</TableCell></TableRow>}
                             </TableBody>
                         </Table>
+                        <TablePagination
+                            rowsPerPageOptions={[10, 25, 50]}
+                            component="div"
+                            count={summary.length}
+                            rowsPerPage={rowsPerPage}
+                            page={page}
+                            onPageChange={(e, newPage) => setPage(newPage)}
+                            onRowsPerPageChange={(e) => {
+                                setRowsPerPage(parseInt(e.target.value, 10));
+                                setPage(0);
+                            }}
+                        />
                     </GlassCard>
                 </Grid>
                 <Grid item xs={12} md={4}>
@@ -117,20 +139,50 @@ export default function DashboardPage() {
                             <Table size="small">
                                 <TableHead><TableRow><TableCell>{t("dashboard.employee")}</TableCell><TableCell>{t("dashboard.taken")}</TableCell></TableRow></TableHead>
                                 <TableBody>
-                                    {debts.map((r) => <TableRow key={r.employee_no}><TableCell>{r.full_name}</TableCell><TableCell>{fmt(r.last_take)}</TableCell></TableRow>)}
+                                    {debts
+                                        .slice(debtsPage * debtsRowsPerPage, debtsPage * debtsRowsPerPage + debtsRowsPerPage)
+                                        .map((r) => <TableRow key={r.employee_no}><TableCell>{r.full_name}</TableCell><TableCell>{fmt(r.last_take)}</TableCell></TableRow>)}
                                     {debts.length === 0 && <TableRow><TableCell colSpan={2} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.noDebts")}</TableCell></TableRow>}
                                 </TableBody>
                             </Table>
+                            <TablePagination
+                                rowsPerPageOptions={[5, 10, 25]}
+                                component="div"
+                                count={debts.length}
+                                rowsPerPage={debtsRowsPerPage}
+                                page={debtsPage}
+                                onPageChange={(e, p) => setDebtsPage(p)}
+                                onRowsPerPageChange={(e) => {
+                                    setDebtsRowsPerPage(parseInt(e.target.value, 10));
+                                    setDebtsPage(0);
+                                }}
+                                sx={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
+                            />
                         </GlassCard>
                         <GlassCard>
                             <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.blockedAttempts")}</Typography>
                             <Table size="small">
                                 <TableHead><TableRow><TableCell>{t("dashboard.time")}</TableCell><TableCell>{t("dashboard.reason")}</TableCell></TableRow></TableHead>
                                 <TableBody>
-                                    {blocked.slice(0, 5).map((r, i) => <TableRow key={i}><TableCell>{fmt(r.event_ts)}</TableCell><TableCell sx={{ color: tokens.status.blocked }}>{r.reject_reason}</TableCell></TableRow>)}
+                                    {blocked
+                                        .slice(blockedPage * blockedRowsPerPage, blockedPage * blockedRowsPerPage + blockedRowsPerPage)
+                                        .map((r, i) => <TableRow key={i}><TableCell>{fmt(r.event_ts)}</TableCell><TableCell sx={{ color: tokens.status.blocked }}>{r.reject_reason}</TableCell></TableRow>)}
                                     {blocked.length === 0 && <TableRow><TableCell colSpan={2} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.clear")}</TableCell></TableRow>}
                                 </TableBody>
                             </Table>
+                            <TablePagination
+                                rowsPerPageOptions={[5, 10, 25]}
+                                component="div"
+                                count={blocked.length}
+                                rowsPerPage={blockedRowsPerPage}
+                                page={blockedPage}
+                                onPageChange={(e, p) => setBlockedPage(p)}
+                                onRowsPerPageChange={(e) => {
+                                    setBlockedRowsPerPage(parseInt(e.target.value, 10));
+                                    setBlockedPage(0);
+                                }}
+                                sx={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
+                            />
                         </GlassCard>
                     </Box>
                 </Grid>

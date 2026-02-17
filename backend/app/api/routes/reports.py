@@ -11,9 +11,47 @@ from app.core.rbac import require_roles
 from app.models.employee import Employee
 from app.models.user import User
 from app.models.event import Event, EventStatus, EventType
-from app.schemas.report import InsideMineItem, MineWorkSummaryItem, ToolDebtItem
+from app.schemas.report import InsideMineItem, MineWorkSummaryItem, ToolDebtItem, ReportSummary
 
 router = APIRouter()
+
+
+@router.get("/summary", response_model=ReportSummary)
+def get_report_summary(
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
+) -> ReportSummary:
+    # Query to count all event types in one go
+    counts = (
+        db.query(Event.event_type, func.count(Event.id))
+        .filter(Event.event_ts >= date_from, Event.event_ts <= date_to)
+        .group_by(Event.event_type)
+        .all()
+    )
+    
+    mapping = {row[0]: row[1] for row in counts}
+    
+    # Blocked attempts (status REJECTED)
+    blocked_count = (
+        db.query(func.count(Event.id))
+        .filter(Event.status == EventStatus.REJECTED)
+        .filter(Event.event_ts >= date_from, Event.event_ts <= date_to)
+        .scalar()
+    ) or 0
+
+    return ReportSummary(
+        turnstile_in=mapping.get(EventType.TURNSTILE_IN, 0),
+        turnstile_out=mapping.get(EventType.TURNSTILE_OUT, 0),
+        esmo_ok=mapping.get(EventType.ESMO_OK, 0),
+        esmo_fail=mapping.get(EventType.ESMO_FAIL, 0),
+        tool_takes=mapping.get(EventType.TOOL_TAKE, 0),
+        tool_returns=mapping.get(EventType.TOOL_RETURN, 0),
+        mine_in=mapping.get(EventType.MINE_IN, 0),
+        mine_out=mapping.get(EventType.MINE_OUT, 0),
+        blocked=blocked_count
+    )
 
 
 @router.get("/inside-mine", response_model=list[InsideMineItem])
@@ -25,7 +63,7 @@ def inside_mine(
         db.query(
             Event.employee_id.label("employee_id"),
             func.max(case((Event.event_type == EventType.MINE_IN, Event.event_ts), else_=None)).label("last_in"),
-            func.max(case((Event.event_type == EventType.MINE_OUT, Event.event_ts), else_=None)).label("last_out"),
+            func.max(case((Event.event_type.in_([EventType.MINE_OUT, EventType.TURNSTILE_OUT]), Event.event_ts), else_=None)).label("last_out"),
         )
         .filter(Event.status == EventStatus.ACCEPTED)
         .group_by(Event.employee_id)
@@ -105,7 +143,7 @@ def daily_mine_summary(
         db.query(Event)
         .filter(
             Event.status == EventStatus.ACCEPTED,
-            Event.event_type.in_([EventType.MINE_IN, EventType.MINE_OUT]),
+            Event.event_type.in_([EventType.MINE_IN, EventType.MINE_OUT, EventType.TURNSTILE_OUT]),
             Event.event_ts >= start,
             Event.event_ts <= end + timedelta(days=1),
         )
@@ -133,7 +171,9 @@ def daily_mine_summary(
                 current_in[emp_id] = ev.event_ts
                 entry["last_in"] = ev.event_ts
                 entry["is_inside"] = True
-        elif ev.event_type == EventType.MINE_OUT:
+        elif ev.event_type in [EventType.MINE_OUT, EventType.TURNSTILE_OUT]:
+            # Only record as exit if they were arguably inside or we are just tracking the last exit event
+            # If they have multiple outs, we just update last_out
             entry["last_out"] = ev.event_ts
             entry["is_inside"] = False
             if emp_id in current_in:

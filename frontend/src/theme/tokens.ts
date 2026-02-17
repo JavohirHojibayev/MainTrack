@@ -17,6 +17,7 @@ const shared = {
         warningBg: "rgba(245,158,11,0.15)",
         blocked: "#ef4444",
         blockedBg: "rgba(239,68,68,0.15)",
+        error: "#ef4444", // Alias for blocked
         offline: "#6b7280",
         offlineBg: "rgba(107,114,128,0.15)",
         info: "#3b82f6",
@@ -42,6 +43,7 @@ export const darkTokens = {
     },
     text: {
         primary: "#e2e8f0",
+        main: "#e2e8f0", // Alias for primary
         secondary: "#94a3b8",
         muted: "#64748b",
         heading: "#f1f5f9",
@@ -73,6 +75,7 @@ export const lightTokens = {
     },
     text: {
         primary: "#1e293b",
+        main: "#1e293b", // Alias for primary
         secondary: "#475569",
         muted: "#94a3b8",
         heading: "#0f172a",

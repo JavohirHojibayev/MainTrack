@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Box, Typography, Button, Table, TableBody, TableCell, TableHead, TableRow, CircularProgress } from "@mui/material";
+import { useOutletContext } from "react-router-dom";
+import { Box, Typography, Button, Table, TableBody, TableCell, TableHead, TableRow, TablePagination, CircularProgress } from "@mui/material";
 import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { fetchEmployees, type Employee } from "@/api/employees";
@@ -10,8 +11,18 @@ import { useAppTheme } from "@/context/ThemeContext";
 export default function EmployeesPage() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
+    const { searchQuery } = useOutletContext<{ searchQuery: string }>();
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [syncing, setSyncing] = useState(false);
+    const [page, setPage] = useState(0);
+    const [rowsPerPage, setRowsPerPage] = useState(25);
+
+    const filteredEmployees = employees.filter(e => {
+        if (!searchQuery) return true;
+        const lowerQuery = searchQuery.toLowerCase();
+        const fullName = `${e.last_name} ${e.first_name} ${e.patronymic || ""}`.toLowerCase();
+        return fullName.includes(lowerQuery) || e.employee_no.toLowerCase().includes(lowerQuery);
+    });
 
     const load = () => { fetchEmployees().then(setEmployees).catch(() => { }); };
     useEffect(() => { load(); }, []);
@@ -45,17 +56,34 @@ export default function EmployeesPage() {
                     WebkitTextFillColor: "transparent",
                     display: "inline-block"
                 }}>{t("employees.title")}</Typography>
-                <Button
-                    variant="outlined"
-                    onClick={handleSync}
-                    disabled={syncing}
-                    startIcon={syncing ? <CircularProgress size={20} /> : null}
-                >
-                    {syncing ? "Syncing..." : "Sync from Turnstile"}
-                </Button>
             </Box>
-
             <GlassCard sx={{ width: "fit-content", minWidth: 650 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
+                    <Typography variant="h4" sx={{ fontWeight: 700, px: 1, fontSize: "30px", color: "#1976d2" }}>Turniket</Typography>
+                    <Button
+                        variant="outlined"
+                        onClick={handleSync}
+                        disabled={syncing}
+                        size="small"
+                        sx={{
+                            borderRadius: "20px",
+                            textTransform: "none",
+                            fontSize: "14px",
+                            fontWeight: 600,
+                            height: "32px",
+                            color: "#3b82f6",
+                            borderColor: "#3b82f6",
+                            bgcolor: "rgba(59, 130, 246, 0.05)",
+                            "&:hover": {
+                                bgcolor: "rgba(59, 130, 246, 0.1)",
+                                borderColor: "#3b82f6"
+                            }
+                        }}
+                        startIcon={syncing ? <CircularProgress size={16} /> : null}
+                    >
+                        {syncing ? "Syncing..." : "Sync from Turnstile"}
+                    </Button>
+                </Box>
                 <Table size="small">
                     <TableHead>
                         <TableRow>
@@ -65,16 +93,30 @@ export default function EmployeesPage() {
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {employees.map((e) => (
-                            <TableRow key={e.id}>
-                                <TableCell>{e.employee_no}</TableCell>
-                                <TableCell>{`${e.last_name} ${e.first_name} ${e.patronymic || ""}`.trim()}</TableCell>
-                                <TableCell sx={{ textAlign: "center" }}><StatusPill status={e.is_active ? "OK" : "OFFLINE"} /></TableCell>
-                            </TableRow>
-                        ))}
-                        {employees.length === 0 && <TableRow><TableCell colSpan={3} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("employees.noEmployees")}</TableCell></TableRow>}
+                        {filteredEmployees
+                            .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                            .map((e) => (
+                                <TableRow key={e.id}>
+                                    <TableCell>{e.employee_no}</TableCell>
+                                    <TableCell>{`${e.last_name} ${e.first_name} ${e.patronymic || ""}`.trim()}</TableCell>
+                                    <TableCell sx={{ textAlign: "center" }}><StatusPill status={e.is_active ? "OK" : "OFFLINE"} /></TableCell>
+                                </TableRow>
+                            ))}
+                        {filteredEmployees.length === 0 && <TableRow><TableCell colSpan={3} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("employees.noEmployees")}</TableCell></TableRow>}
                     </TableBody>
                 </Table>
+                <TablePagination
+                    rowsPerPageOptions={[25, 50, 100]}
+                    component="div"
+                    count={filteredEmployees.length}
+                    rowsPerPage={rowsPerPage}
+                    page={page}
+                    onPageChange={(e, newPage) => setPage(newPage)}
+                    onRowsPerPageChange={(e) => {
+                        setRowsPerPage(parseInt(e.target.value, 10));
+                        setPage(0);
+                    }}
+                />
             </GlassCard>
         </Box>
     );

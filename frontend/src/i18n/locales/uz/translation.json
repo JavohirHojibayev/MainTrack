@@ -136,6 +136,7 @@
     },
     "adminUsers": {
         "title": "Foydalanuvchilarni boshqarish",
+        "delete": "O'chirish",
         "col": {
             "id": "ID",
             "username": "Login",
