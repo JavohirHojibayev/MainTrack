@@ -32,6 +32,16 @@ logger = logging.getLogger("hikvision.webhook")
 
 router = APIRouter()
 
+# Mapping based on user request and iVMS
+DEVICE_IP_MAP = {
+    "192.168.0.223": {"name": "Kirish-1", "direction": EventType.MINE_IN},
+    "192.168.0.221": {"name": "Kirish-2", "direction": EventType.MINE_IN},
+    "192.168.0.219": {"name": "Kirish-3", "direction": EventType.MINE_IN},
+    "192.168.0.224": {"name": "Chiqish-1", "direction": EventType.MINE_OUT},
+    "192.168.0.222": {"name": "Chiqish-2", "direction": EventType.MINE_OUT},
+    "192.168.0.220": {"name": "Chiqish-3", "direction": EventType.MINE_OUT},
+}
+
 
 # ─── Webhook Receiver (no auth — called by turnstile devices) ─────────
 
@@ -47,15 +57,26 @@ def _get_or_create_device_by_ip(db, ip: str, mac: str = "") -> Device | None:
         device.last_seen = now
         if not device.host:
             device.host = ip
+            
+        # Enforce name from map if available
+        if ip in DEVICE_IP_MAP:
+            mapped_name = DEVICE_IP_MAP[ip]["name"]
+            if device.name != mapped_name:
+                device.name = mapped_name
+                
         db.commit()
         return device
 
+    initial_name = f"Turnstile-{ip}"
+    if ip in DEVICE_IP_MAP:
+        initial_name = DEVICE_IP_MAP[ip]["name"]
+
     device = Device(
-        name=f"Turnstile-{ip}",
+        name=initial_name,
         device_code=device_code,
         host=ip,
         device_type=DeviceType.HIKVISION,
-        location=f"Turnstile-{ip}",
+        location=initial_name,
         api_key=f"hikvision_{device_code}",
         is_active=True,
         last_seen=now,
@@ -161,8 +182,14 @@ def _parse_event_xml(xml_body: str) -> dict | None:
     }
 
 
-def _determine_direction(event_data: dict) -> EventType:
-    """Determine TURNSTILE_IN or TURNSTILE_OUT from event data."""
+def _determine_direction(ip_address: str, event_data: dict) -> EventType:
+    """Determine MINE_IN or MINE_OUT from event data or IP mapping."""
+    
+    # 1. Check IP mapping first (strongest signal)
+    if ip_address in DEVICE_IP_MAP:
+        return DEVICE_IP_MAP[ip_address]["direction"]
+
+    # 2. Fallback to existing logic
     # Check cardReaderNo or doorNo
     # Convention: reader 1 / odd door = IN, reader 2 / even door = OUT
     reader_no = int(event_data.get("cardReaderNo", "0") or "0")
@@ -309,11 +336,34 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
         # FORCE SERVER TIME (User request: turnstile time is wrong/unreliable)
         server_now = datetime.now(timezone(timedelta(hours=5)))
         
+        # Determine event type
+        event_type = _determine_direction(ip_address, event_data)
+
+        # Debounce: Check for recent event (same employee, same type) within last 5 seconds
+        recent_event = (
+            db.query(Event)
+            .filter(
+                Event.employee_id == employee.id,
+                Event.event_type == event_type,
+                Event.event_ts >= server_now - timedelta(seconds=5)
+            )
+            .first()
+        )
+
+        if recent_event:
+            logger.info("Debounced duplicate event for employee %s (type=%s)", employee_no, event_type)
+            print(f"DEBUG: Debounced duplicate event for {employee_no}")
+            return Response(status_code=200, content="OK")
+
+        # Create event
+        # FORCE SERVER TIME (User request: turnstile time is wrong/unreliable)
+        # server_now is defined above
+        
         event = Event(
             device_id=device.id,
             employee_id=employee.id,
-            event_type=_determine_direction(event_data),
-            event_ts=server_now, # _parse_hikvision_time(event_time),
+            event_type=event_type,
+            event_ts=server_now, 
             raw_id=raw_id,
             status=EventStatus.ACCEPTED,
             source_payload=event_data,
@@ -479,5 +529,43 @@ def start_user_sync(
     except Exception as e:
         logger.error("Sync failed: %s", e)
         return {"success": False, "message": str(e)}
+    finally:
+        db.close()
+
+@router.post("/fix-names")
+def fix_device_names_endpoint() -> dict:
+    """Force update device names from DEVICE_IP_MAP."""
+    db = SessionLocal()
+    try:
+        updated = 0
+        details = []
+        for ip, config in DEVICE_IP_MAP.items():
+            mapped_name = config["name"]
+            device = db.query(Device).filter(Device.host == ip).first()
+            if device:
+                if device.name != mapped_name:
+                    old_name = device.name
+                    device.name = mapped_name
+                    device.location = mapped_name
+                    details.append(f"{ip}: UPDATED {old_name} -> {mapped_name}")
+                    updated += 1
+                else:
+                    details.append(f"{ip}: OK (Already {device.name})")
+            else:
+                 details.append(f"{ip}: NOT FOUND in DB")
+        
+
+        if updated > 0:
+            db.commit()
+
+        # List all devices for verification
+        all_devices = db.query(Device).all()
+        for d in all_devices:
+            details.append(f"DB RECORD: id={d.id} name='{d.name}' host='{d.host}' code='{d.device_code}'")
+            
+        return {"success": True, "updated_count": updated, "details": details}
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
     finally:
         db.close()

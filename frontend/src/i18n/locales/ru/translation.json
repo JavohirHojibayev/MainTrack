@@ -39,6 +39,8 @@
         "dailyActivity": "Ежедневная активность",
         "status": "Статус",
         "entered": "Вошел",
+        "statusInside": "Внутри",
+        "statusOutside": "Снаружи",
         "exited": "Вышел",
         "duration": "Длительность"
     },
@@ -88,7 +90,9 @@
             "position": "Должность",
             "status": "Статус",
             "fullName": "ФИО"
-        }
+        },
+        "syncButton": "Синх",
+        "syncing": "Синхр..."
     },
     "devices": {
         "title": "Устройства",

@@ -26,11 +26,11 @@ export default function Layout() {
 
     return (
         <LayoutContext.Provider value={{ searchQuery, setSearchQuery }}>
-            <Box sx={{ display: "flex", minHeight: "100vh" }}>
+            <Box sx={{ display: "flex", height: "100vh" }}>
                 <Sidebar />
-                <Box sx={{ flex: 1, ml: `${tokens.sidebar.widthCollapsed}px`, display: "flex", flexDirection: "column" }}>
+                <Box sx={{ flex: 1, ml: `${tokens.sidebar.widthCollapsed}px`, display: "flex", flexDirection: "column", minWidth: 0, height: "100vh", overflow: "hidden" }}>
                     <TopBar />
-                    <Box component="main" sx={{ flex: 1, p: 3, overflow: "auto" }}>
+                    <Box component="main" sx={{ flex: 1, p: 3, overflowY: "auto", overflowX: "hidden", minWidth: 0 }}>
                         <Outlet context={{ searchQuery }} />
                     </Box>
                 </Box>

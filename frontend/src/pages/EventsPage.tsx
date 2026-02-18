@@ -26,14 +26,20 @@ export default function EventsPage() {
             width: 200,
             hideable: false,
             valueGetter: (value, row) => {
-                if (row && row.first_name && row.last_name) return `${row.last_name} ${row.first_name}`;
-                return "";
+                const parts = [row.last_name, row.first_name, row.patronymic].filter(Boolean);
+                return parts.join(" ");
             }
         },
         { field: "employee_no", headerName: t("events.col.employeeNo") || "Employee #", width: 120, hideable: false },
         { field: "event_ts", headerName: t("events.col.time"), width: 180, hideable: false, valueFormatter: (p) => { try { return new Date(p as string).toLocaleString("en-GB"); } catch { return p as string; } } },
         { field: "event_type", headerName: t("events.col.type"), width: 140, hideable: false },
-        { field: "device_id", headerName: t("events.col.deviceId"), width: 100, hideable: false },
+        {
+            field: "device_name",
+            headerName: t("events.col.deviceId") || "Device",
+            width: 150,
+            hideable: false,
+            valueGetter: (value, row) => row.device_name || row.device_id
+        },
         {
             field: "status",
             headerName: t("events.col.status"),
@@ -52,7 +58,7 @@ export default function EventsPage() {
     useEffect(() => { load(); }, []);
 
     return (
-        <Box>
+        <Box sx={{ height: "calc(100vh - 120px)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <Typography variant="h4" sx={{
                 mb: 3,
                 fontSize: "2.5rem",
@@ -60,9 +66,10 @@ export default function EventsPage() {
                 background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
-                display: "inline-block"
+                display: "inline-block",
+                flexShrink: 0
             }}>{t("events.title")}</Typography>
-            <GlassCard sx={{ mb: 3, p: 2 }}>
+            <GlassCard sx={{ mb: 3, p: 2, flexShrink: 0 }}>
                 <Grid container spacing={2} alignItems="center">
                     <Grid item xs={12} sm={6} md={2}><TextField label={t("events.dateFrom")} type="datetime-local" fullWidth InputLabelProps={{ shrink: true }} onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value ? new Date(e.target.value).toISOString() : undefined }))} /></Grid>
                     <Grid item xs={12} sm={6} md={2}><TextField label={t("events.dateTo")} type="datetime-local" fullWidth InputLabelProps={{ shrink: true }} onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value ? new Date(e.target.value).toISOString() : undefined }))} /></Grid>
@@ -80,14 +87,17 @@ export default function EventsPage() {
                     <Grid item xs={12} sm={6} md={2}><Button variant="contained" fullWidth onClick={load} sx={{ height: 40 }}>{t("events.apply")}</Button></Grid>
                 </Grid>
             </GlassCard>
-            <GlassCard sx={{ p: 0, "& .MuiDataGrid-root": { border: "none" } }}>
+            <GlassCard sx={{ p: 0, flex: 1, minWidth: 0, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
                 <DataGrid
                     rows={rows} columns={columns} loading={loading}
                     pageSizeOptions={[25, 50, 100]}
                     initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
                     onRowClick={(p) => setSelected(p.row as EventRow)}
-                    autoHeight
+                    disableColumnSorting
+                    disableColumnMenu
                     sx={{
+                        height: "100%",
+                        width: "100%",
                         "& .MuiDataGrid-columnHeaders": { bgcolor: tokens.bg.tableHeader },
                         "& .MuiDataGrid-row:nth-of-type(even)": { bgcolor: tokens.bg.tableRowAlt },
                         "& .MuiDataGrid-cell": { borderColor: tokens.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)" },

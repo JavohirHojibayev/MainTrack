@@ -1,7 +1,7 @@
 import { Chip, type ChipProps } from "@mui/material";
 import { useAppTheme } from "@/context/ThemeContext";
 
-type Status = "ACCEPTED" | "OK" | "REJECTED" | "FAIL" | "BLOCKED" | "WARNING" | "OFFLINE" | "ONLINE" | "DUPLICATE" | "ERROR" | "PENDING";
+type Status = "ACCEPTED" | "OK" | "REJECTED" | "FAIL" | "BLOCKED" | "WARNING" | "OFFLINE" | "ONLINE" | "DUPLICATE" | "ERROR" | "PENDING" | "INSIDE" | "OUTSIDE";
 
 export default function StatusPill({ status, colorStatus, ...rest }: Omit<ChipProps, "color"> & { status: string; colorStatus?: string }) {
     const { tokens } = useAppTheme();
@@ -17,6 +17,8 @@ export default function StatusPill({ status, colorStatus, ...rest }: Omit<ChipPr
         PENDING: { bg: tokens.status.warningBg, fg: tokens.status.warning },
         DUPLICATE: { bg: tokens.status.infoBg, fg: tokens.status.info },
         OFFLINE: { bg: tokens.status.warningBg, fg: tokens.status.warning },
+        INSIDE: { bg: tokens.status.warningBg, fg: tokens.status.warning },
+        OUTSIDE: { bg: tokens.status.okBg, fg: tokens.status.ok },
     };
     const key = (colorStatus || status).toUpperCase() as Status;
     const c = colorMap[key] ?? { bg: tokens.status.offlineBg, fg: tokens.status.offline };

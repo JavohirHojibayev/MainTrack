@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Box, Grid, Typography, Table, TableBody, TableCell, TableHead, TableRow, TablePagination } from "@mui/material";
 import PeopleIcon from "@mui/icons-material/PeopleRounded";
@@ -10,13 +10,15 @@ import StatusPill from "@/components/StatusPill";
 import { useAppTheme } from "@/context/ThemeContext";
 import { fetchDailyMineSummary, fetchToolDebts, fetchBlockedAttempts, fetchEsmoSummary, type DailySummaryRow, type ToolDebtRow, type BlockedRow } from "@/api/dashboard";
 
-function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number; color: string }) {
+function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number | string | React.ReactNode; color: string }) {
     const { tokens } = useAppTheme();
+    const isComplex = React.isValidElement(value) || (typeof value === "object" && value !== null);
+
     return (
         <GlassCard sx={{ display: "flex", alignItems: "center", gap: 2 }}>
             <Box sx={{ width: 52, height: 52, borderRadius: `${tokens.radius.sm}px`, display: "flex", alignItems: "center", justifyContent: "center", bgcolor: `${color}22`, color }}>{icon}</Box>
             <Box>
-                <Typography variant="h5" sx={{ fontWeight: 700, color }}>{value}</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700, color: isComplex ? undefined : color, fontSize: typeof value === "string" && value.length > 5 ? "1.2rem" : "1.5rem" }}>{value}</Typography>
                 <Typography variant="body2">{label}</Typography>
             </Box>
         </GlassCard>
@@ -58,7 +60,17 @@ export default function DashboardPage() {
             const day = String(d.getDate()).padStart(2, '0');
             const today = `${year}-${month}-${day}`;
 
-            fetchDailyMineSummary(today).then(setSummary).catch(() => { });
+            fetchDailyMineSummary(today)
+                .then(data => {
+                    // Sort by last_in DESC
+                    const sorted = data.sort((a, b) => {
+                        const ta = a.last_in ? new Date(a.last_in).getTime() : 0;
+                        const tb = b.last_in ? new Date(b.last_in).getTime() : 0;
+                        return tb - ta;
+                    });
+                    setSummary(sorted);
+                })
+                .catch(() => { });
             fetchToolDebts().then(setDebts).catch(() => { });
             fetchBlockedAttempts().then(setBlocked).catch(() => { });
             fetchEsmoSummary(today).then(setEsmoCount).catch(() => { });
@@ -69,6 +81,8 @@ export default function DashboardPage() {
     }, []);
 
     const insideCount = summary.filter(r => r.is_inside).length;
+    const enteredCount = summary.length;
+    const exitedCount = summary.filter(r => !r.is_inside).length;
 
     return (
         <Box>
@@ -82,7 +96,20 @@ export default function DashboardPage() {
                 display: "inline-block" // Ensure gradient applies correctly
             }}>{t("dashboard.title")}</Typography>
             <Grid container spacing={2} sx={{ mb: 3 }}>
-                <Grid item xs={12} sm={6} md={3}><KpiCard icon={<PeopleIcon />} label={t("dashboard.insideMine")} value={insideCount} color={tokens.status.ok} /></Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <KpiCard
+                        icon={<PeopleIcon />}
+                        label={`${t("dashboard.statusInside")} / ${t("dashboard.statusOutside")}`}
+                        value={
+                            <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                <Box component="span" sx={{ color: "#f59e0b !important" }}>{insideCount}</Box>
+                                <Box component="span" sx={{ color: tokens.text.muted + " !important", fontSize: "1.2rem" }}>/</Box>
+                                <Box component="span" sx={{ color: "#10b981 !important" }}>{exitedCount}</Box>
+                            </Box>
+                        }
+                        color={tokens.status.ok}
+                    />
+                </Grid>
                 <Grid item xs={12} sm={6} md={3}><KpiCard icon={<MedicalIcon />} label={t("dashboard.esmoOkToday")} value={esmoCount} color={tokens.brand.secondary} /></Grid>
                 <Grid item xs={12} sm={6} md={3}><KpiCard icon={<BuildIcon />} label={t("dashboard.toolDebts")} value={debts.length} color={tokens.status.warning} /></Grid>
                 <Grid item xs={12} sm={6} md={3}><KpiCard icon={<BlockIcon />} label={t("dashboard.blockedAttempts")} value={blocked.length} color={tokens.status.blocked} /></Grid>
@@ -90,7 +117,7 @@ export default function DashboardPage() {
             <Grid container spacing={2}>
                 <Grid item xs={12} md={8}>
                     <GlassCard>
-                        <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.dailyActivity")}</Typography>
+                        <Typography variant="h6" sx={{ mb: 2, color: tokens.status.ok, fontWeight: 700 }}>{t("dashboard.dailyActivity")}</Typography>
                         <Table size="small">
                             <TableHead>
                                 <TableRow>
@@ -109,7 +136,7 @@ export default function DashboardPage() {
                                         <TableRow key={r.employee_no}>
                                             <TableCell>{r.employee_no}</TableCell>
                                             <TableCell>{r.full_name}</TableCell>
-                                            <TableCell><StatusPill status={r.is_inside ? "INSIDE" : "OUTSIDE"} /></TableCell>
+                                            <TableCell><StatusPill status={r.is_inside ? t("dashboard.statusInside") : t("dashboard.statusOutside")} colorStatus={r.is_inside ? "INSIDE" : "OUTSIDE"} /></TableCell>
                                             <TableCell>{fmt(r.last_in)}</TableCell>
                                             <TableCell>{fmt(r.last_out)}</TableCell>
                                             <TableCell>{dur(r.total_minutes)}</TableCell>
@@ -135,7 +162,7 @@ export default function DashboardPage() {
                 <Grid item xs={12} md={4}>
                     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
                         <GlassCard>
-                            <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.toolDebts")}</Typography>
+                            <Typography variant="h6" sx={{ mb: 2, color: tokens.status.warning, fontWeight: 700 }}>{t("dashboard.toolDebts")}</Typography>
                             <Table size="small">
                                 <TableHead><TableRow><TableCell>{t("dashboard.employee")}</TableCell><TableCell>{t("dashboard.taken")}</TableCell></TableRow></TableHead>
                                 <TableBody>
@@ -160,7 +187,7 @@ export default function DashboardPage() {
                             />
                         </GlassCard>
                         <GlassCard>
-                            <Typography variant="h6" sx={{ mb: 2 }}>{t("dashboard.blockedAttempts")}</Typography>
+                            <Typography variant="h6" sx={{ mb: 2, color: tokens.status.blocked, fontWeight: 700 }}>{t("dashboard.blockedAttempts")}</Typography>
                             <Table size="small">
                                 <TableHead><TableRow><TableCell>{t("dashboard.time")}</TableCell><TableCell>{t("dashboard.reason")}</TableCell></TableRow></TableHead>
                                 <TableBody>

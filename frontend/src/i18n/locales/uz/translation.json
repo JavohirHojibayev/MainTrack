@@ -39,6 +39,8 @@
         "dailyActivity": "Kunlik faoliyat",
         "status": "Holat",
         "entered": "Kirgan",
+        "statusInside": "Ichkarida",
+        "statusOutside": "Tashqarida",
         "exited": "Chiqqan",
         "duration": "Davomiyligi"
     },
@@ -88,7 +90,9 @@
             "position": "Lavozim",
             "status": "Holat",
             "fullName": "F.I.O."
-        }
+        },
+        "syncButton": "Sinx",
+        "syncing": "Sinx..."
     },
     "devices": {
         "title": "Qurilmalar",

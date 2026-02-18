@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useOutletContext } from "react-router-dom";
-import { Box, Typography, Button, Table, TableBody, TableCell, TableHead, TableRow, TablePagination, CircularProgress } from "@mui/material";
+import { Box, Typography, Button, CircularProgress } from "@mui/material";
+import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { fetchEmployees, type Employee } from "@/api/employees";
@@ -13,18 +14,17 @@ export default function EmployeesPage() {
     const { tokens } = useAppTheme();
     const { searchQuery } = useOutletContext<{ searchQuery: string }>();
     const [employees, setEmployees] = useState<Employee[]>([]);
+    const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
-    const [page, setPage] = useState(0);
-    const [rowsPerPage, setRowsPerPage] = useState(25);
 
-    const filteredEmployees = employees.filter(e => {
-        if (!searchQuery) return true;
-        const lowerQuery = searchQuery.toLowerCase();
-        const fullName = `${e.last_name} ${e.first_name} ${e.patronymic || ""}`.toLowerCase();
-        return fullName.includes(lowerQuery) || e.employee_no.toLowerCase().includes(lowerQuery);
-    });
+    const load = () => {
+        setLoading(true);
+        fetchEmployees()
+            .then(setEmployees)
+            .catch(() => { })
+            .finally(() => setLoading(false));
+    };
 
-    const load = () => { fetchEmployees().then(setEmployees).catch(() => { }); };
     useEffect(() => { load(); }, []);
 
     const handleSync = async () => {
@@ -45,21 +45,51 @@ export default function EmployeesPage() {
         }
     };
 
+    const filteredEmployees = employees.filter(e => {
+        if (!searchQuery) return true;
+        const lowerQuery = searchQuery.toLowerCase();
+        const fullName = `${e.last_name} ${e.first_name} ${e.patronymic || ""}`.toLowerCase();
+        return fullName.includes(lowerQuery) || e.employee_no.toLowerCase().includes(lowerQuery);
+    });
+
+    const columns: GridColDef[] = [
+        { field: "employee_no", headerName: t("employees.col.employeeNo"), width: 150, hideable: false },
+        {
+            field: "full_name",
+            headerName: t("employees.col.fullName"),
+            width: 400,
+            hideable: false,
+            valueGetter: (value, row) => {
+                const parts = [row.last_name, row.first_name, row.patronymic].filter(Boolean);
+                return parts.join(" ");
+            }
+        },
+        {
+            field: "status",
+            headerName: t("employees.col.status"),
+            width: 150,
+            headerAlign: "center",
+            align: "center",
+            hideable: false,
+            renderCell: (params) => <StatusPill status={params.row.is_active ? "OK" : "OFFLINE"} />
+        },
+    ];
+
     return (
-        <Box sx={{ p: 2 }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
+        <Box sx={{ height: "calc(100vh - 120px)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <Box sx={{ mb: 3, flexShrink: 0 }}>
                 <Typography variant="h4" sx={{
                     fontSize: "2.5rem",
                     fontWeight: 700,
                     background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
                     WebkitBackgroundClip: "text",
                     WebkitTextFillColor: "transparent",
-                    display: "inline-block"
                 }}>{t("employees.title")}</Typography>
             </Box>
-            <GlassCard sx={{ width: "fit-content", minWidth: 650 }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
-                    <Typography variant="h4" sx={{ fontWeight: 700, px: 1, fontSize: "30px", color: "#1976d2" }}>Turniket</Typography>
+
+            <GlassCard sx={{ p: 0, display: "flex", flexDirection: "column", flex: 1, width: "fit-content", minWidth: 0, maxWidth: "100%", overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
+                <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 2, bgcolor: tokens.mode === "dark" ? tokens.bg.tableHeader : "#F0F4FA" }}>
+                    <Typography variant="h4" sx={{ fontWeight: 700, fontSize: "30px", color: "#1976d2" }}>Turniket</Typography>
                     <Button
                         variant="outlined"
                         onClick={handleSync}
@@ -81,40 +111,24 @@ export default function EmployeesPage() {
                         }}
                         startIcon={syncing ? <CircularProgress size={16} /> : null}
                     >
-                        {syncing ? "Syncing..." : "Sync from Turnstile"}
+                        {syncing ? t("employees.syncing") : t("employees.syncButton")}
                     </Button>
                 </Box>
-                <Table size="small">
-                    <TableHead>
-                        <TableRow>
-                            <TableCell sx={{ width: "120px" }}>{t("employees.col.employeeNo")}</TableCell>
-                            <TableCell sx={{ width: "350px" }}>{t("employees.col.fullName")}</TableCell>
-                            <TableCell sx={{ width: "100px", textAlign: "center" }}>{t("employees.col.status")}</TableCell>
-                        </TableRow>
-                    </TableHead>
-                    <TableBody>
-                        {filteredEmployees
-                            .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                            .map((e) => (
-                                <TableRow key={e.id}>
-                                    <TableCell>{e.employee_no}</TableCell>
-                                    <TableCell>{`${e.last_name} ${e.first_name} ${e.patronymic || ""}`.trim()}</TableCell>
-                                    <TableCell sx={{ textAlign: "center" }}><StatusPill status={e.is_active ? "OK" : "OFFLINE"} /></TableCell>
-                                </TableRow>
-                            ))}
-                        {filteredEmployees.length === 0 && <TableRow><TableCell colSpan={3} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("employees.noEmployees")}</TableCell></TableRow>}
-                    </TableBody>
-                </Table>
-                <TablePagination
-                    rowsPerPageOptions={[25, 50, 100]}
-                    component="div"
-                    count={filteredEmployees.length}
-                    rowsPerPage={rowsPerPage}
-                    page={page}
-                    onPageChange={(e, newPage) => setPage(newPage)}
-                    onRowsPerPageChange={(e) => {
-                        setRowsPerPage(parseInt(e.target.value, 10));
-                        setPage(0);
+                <DataGrid
+                    rows={filteredEmployees}
+                    columns={columns}
+                    loading={loading}
+                    disableColumnSorting
+                    disableColumnMenu
+                    pageSizeOptions={[25, 50, 100]}
+                    initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+                    sx={{
+                        flex: 1,
+                        width: "100%",
+                        minHeight: 0,
+                        "& .MuiDataGrid-columnHeaders": { bgcolor: tokens.bg.tableHeader },
+                        "& .MuiDataGrid-row:nth-of-type(even)": { bgcolor: tokens.bg.tableRowAlt },
+                        "& .MuiDataGrid-cell": { borderColor: tokens.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)" },
                     }}
                 />
             </GlassCard>

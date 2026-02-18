@@ -304,6 +304,7 @@ def list_events(
         query = query.join(Employee).filter(Employee.employee_no.ilike(f"%{employee_no}%"))
     
     # Eager load employee for display
-    query = query.options(joinedload(Event.employee))
+    # Eager load employee and device for display
+    query = query.options(joinedload(Event.employee), joinedload(Event.device))
 
     return query.order_by(Event.event_ts.desc()).limit(limit).all()

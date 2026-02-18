@@ -39,6 +39,8 @@
         "dailyActivity": "Daily Activity",
         "status": "Status",
         "entered": "Entered",
+        "statusInside": "Inside",
+        "statusOutside": "Outside",
         "exited": "Exited",
         "duration": "Duration"
     },
@@ -88,7 +90,9 @@
             "position": "Position",
             "status": "Status",
             "fullName": "Full Name"
-        }
+        },
+        "syncButton": "Synch",
+        "syncing": "Syncing..."
     },
     "devices": {
         "title": "Devices",

@@ -33,6 +33,7 @@ export default function TopBar() {
                 height: tokens.topbar.height, display: "flex", alignItems: "center", px: 3, gap: 2,
                 background: tokens.bg.topbar, backdropFilter: `blur(${tokens.glass.blur})`,
                 borderBottom: tokens.glass.border,
+                position: "sticky", top: 0, zIndex: 1100, flexShrink: 0,
             }}
         >
             <Typography variant="h6" sx={{

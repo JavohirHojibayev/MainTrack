@@ -113,17 +113,16 @@ export default function ReportsPage() {
     };
 
     return (
-        <Box sx={{ p: 2 }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-                <Typography variant="h4" sx={{
-                    fontSize: "2.5rem",
-                    fontWeight: 700,
-                    background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
-                    WebkitBackgroundClip: "text",
-                    WebkitTextFillColor: "transparent",
-                    display: "inline-block"
-                }}>{t("reports.title")}</Typography>
-            </Box>
+        <Box>
+            <Typography variant="h4" sx={{
+                mb: 3,
+                fontSize: "2.5rem",
+                fontWeight: 700,
+                background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                display: "inline-block"
+            }}>{t("reports.title")}</Typography>
             <GlassCard sx={{ mb: 3 }}>
                 <Grid container spacing={2} alignItems="center">
                     <Grid item xs={12} sm={4} md={3}>
