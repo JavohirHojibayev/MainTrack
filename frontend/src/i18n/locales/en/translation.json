@@ -7,6 +7,7 @@
     "nav": {
         "dashboard": "Dashboard",
         "events": "Turnstile",
+        "esmo": "ESMO",
         "employees": "Employees",
         "devices": "Devices",
         "reports": "Reports",
@@ -77,6 +78,23 @@
             "reason": "Reason"
         }
     },
+    "esmo": {
+        "title": "ESMO Journal",
+        "dateFrom": "Date From",
+        "dateTo": "Date To",
+        "search": "Search",
+        "searchHint": "Name or ID",
+        "apply": "Apply",
+        "exportCsv": "Export CSV",
+        "exportPdf": "Export PDF",
+        "col": {
+            "name": "Name",
+            "employeeNo": "Employee #",
+            "time": "Time",
+            "device": "Device",
+            "status": "Status"
+        }
+    },
     "employees": {
         "title": "Employees",
         "addEmployee": "Add Employee",
@@ -99,7 +117,9 @@
             "fullName": "Full Name"
         },
         "syncButton": "Synch",
-        "syncing": "Syncing..."
+        "syncing": "Syncing...",
+        "esmoSyncButton": "Synch",
+        "esmoSyncing": "Syncing..."
     },
     "devices": {
         "title": "Devices",

@@ -12,7 +12,7 @@ import { useAppTheme } from "@/context/ThemeContext";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-export default function EventsPage() {
+export default function TurnstileJournalPage() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
     const [rows, setRows] = useState<EventRow[]>([]);

@@ -7,24 +7,27 @@ import {
     TableCell,
     TableHead,
     TableRow,
-    Paper,
     Chip,
-    TableContainer
+    TableContainer,
+    TablePagination
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import dayjs from "dayjs";
+import GlassCard from "@/components/GlassCard";
 import { fetchMedicalExams, type MedicalExam } from "@/api/medical";
 import { useAppTheme } from "@/context/ThemeContext";
 
 export const MedicalExamList: React.FC = () => {
     const { t } = useTranslation();
-    const { mode } = useAppTheme();
+    const { tokens } = useAppTheme();
     const [exams, setExams] = useState<MedicalExam[]>([]);
     const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(0);
+    const [rowsPerPage, setRowsPerPage] = useState(5);
 
     const loadExams = async () => {
         try {
-            const data = await fetchMedicalExams({ limit: 10 });
+            const data = await fetchMedicalExams({ limit: 50 });
             setExams(data);
         } catch (error) {
             console.error("Failed to load exams", error);
@@ -35,7 +38,6 @@ export const MedicalExamList: React.FC = () => {
 
     useEffect(() => {
         loadExams();
-        // Refresh every 30 seconds
         const interval = setInterval(loadExams, 30000);
         return () => clearInterval(interval);
     }, []);
@@ -45,37 +47,25 @@ export const MedicalExamList: React.FC = () => {
     }
 
     return (
-        <Paper
-            elevation={0}
-            sx={{
-                p: 2,
-                borderRadius: 4,
-                border: "1px solid",
-                borderColor: "divider",
-                bgcolor: "background.paper",
-                height: "100%",
-                overflow: "hidden"
-            }}
-        >
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-                <Typography variant="h6" fontWeight="bold">
-                    🩺 {t("dashboard.medicalExams", "Recent Medical Exams")}
+        <GlassCard>
+            <Box sx={{ mb: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <Typography variant="h6" sx={{ color: tokens.brand.secondary, fontWeight: 700 }}>
+                    ESMO
                 </Typography>
-                <Chip label="Live" color="success" size="small" variant="outlined" />
             </Box>
-
-            <TableContainer sx={{ maxHeight: 400 }}>
-                <Table size="small" stickyHeader>
-                    <TableHead>
-                        <TableRow>
-                            <TableCell>Time</TableCell>
-                            <TableCell>Employee</TableCell>
-                            <TableCell>Result</TableCell>
-                            <TableCell>Vitals</TableCell>
-                        </TableRow>
-                    </TableHead>
-                    <TableBody>
-                        {exams.map((exam) => (
+            <Table size="small">
+                <TableHead>
+                    <TableRow>
+                        <TableCell>{t("dashboard.time", "Time")}</TableCell>
+                        <TableCell>{t("dashboard.employee", "Employee")}</TableCell>
+                        <TableCell>{t("dashboard.status", "Result")}</TableCell>
+                        <TableCell>Vitals</TableCell>
+                    </TableRow>
+                </TableHead>
+                <TableBody>
+                    {exams
+                        .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                        .map((exam) => (
                             <TableRow key={exam.id} hover>
                                 <TableCell sx={{ whiteSpace: "nowrap" }}>
                                     {dayjs(exam.timestamp).format("HH:mm:ss")}
@@ -91,22 +81,34 @@ export const MedicalExamList: React.FC = () => {
                                     />
                                 </TableCell>
                                 <TableCell sx={{ fontSize: "0.85rem" }}>
-                                    {exam.pressure_systolic && `${exam.pressure_systolic}/${exam.pressure_diastolic} mmHg`}
-                                    {exam.pulse && `, ❤️ ${exam.pulse}`}
-                                    {exam.temperature && `, 🌡️ ${exam.temperature}°C`}
+                                    {exam.pressure_systolic && `${exam.pressure_systolic}/${exam.pressure_diastolic}`}
+                                    {exam.pulse && ` ❤️${exam.pulse}`}
+                                    {exam.temperature && ` 🌡️${exam.temperature}°`}
                                 </TableCell>
                             </TableRow>
                         ))}
-                        {exams.length === 0 && (
-                            <TableRow>
-                                <TableCell colSpan={4} align="center">
-                                    No recent exams found.
-                                </TableCell>
-                            </TableRow>
-                        )}
-                    </TableBody>
-                </Table>
-            </TableContainer>
-        </Paper>
+                    {exams.length === 0 && (
+                        <TableRow>
+                            <TableCell colSpan={4} sx={{ textAlign: "center", color: tokens.text.muted }}>
+                                {t("dashboard.noData")}
+                            </TableCell>
+                        </TableRow>
+                    )}
+                </TableBody>
+            </Table>
+            <TablePagination
+                rowsPerPageOptions={[5, 10, 25]}
+                component="div"
+                count={exams.length}
+                rowsPerPage={rowsPerPage}
+                page={page}
+                onPageChange={(e, p) => setPage(p)}
+                onRowsPerPageChange={(e) => {
+                    setRowsPerPage(parseInt(e.target.value, 10));
+                    setPage(0);
+                }}
+                sx={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
+            />
+        </GlassCard>
     );
 };

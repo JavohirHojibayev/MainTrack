@@ -2,10 +2,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Box, List, ListItemButton, ListItemIcon, Tooltip, Typography } from "@mui/material";
 import DashboardIcon from "@mui/icons-material/DashboardRounded";
-import ListAltIcon from "@mui/icons-material/ListAltRounded";
+import TurnstileIcon from "./icons/TurnstileIcon";
 import PeopleIcon from "@mui/icons-material/PeopleRounded";
 import DevicesIcon from "@mui/icons-material/DevicesOtherRounded";
 import AssessmentIcon from "@mui/icons-material/AssessmentRounded";
+import MedicalServicesIcon from "@mui/icons-material/MedicalServicesRounded";
 import AdminIcon from "@mui/icons-material/AdminPanelSettingsRounded";
 import { useAppTheme } from "@/context/ThemeContext";
 
@@ -18,7 +19,8 @@ export default function Sidebar() {
 
     const navItems = [
         { path: "/dashboard", label: t("nav.dashboard"), icon: <DashboardIcon /> },
-        { path: "/events", label: t("nav.events"), icon: <ListAltIcon /> },
+        { path: "/turnstile-journal", label: t("nav.events"), icon: <TurnstileIcon /> },
+        { path: "/esmo-journal", label: t("nav.esmo"), icon: <MedicalServicesIcon /> },
         { path: "/employees", label: t("nav.employees"), icon: <PeopleIcon /> },
         { path: "/devices", label: t("nav.devices"), icon: <DevicesIcon /> },
         { path: "/reports", label: t("nav.reports"), icon: <AssessmentIcon /> },

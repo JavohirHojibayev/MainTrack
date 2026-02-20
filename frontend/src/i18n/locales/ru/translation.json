@@ -7,6 +7,7 @@
     "nav": {
         "dashboard": "Панель",
         "events": "Турникет",
+        "esmo": "ЭСМО",
         "employees": "Сотрудники",
         "devices": "Устройства",
         "reports": "Отчёты",
@@ -77,6 +78,23 @@
             "reason": "Причина"
         }
     },
+    "esmo": {
+        "title": "Журнал ЭСМО",
+        "dateFrom": "Дата от",
+        "dateTo": "Дата до",
+        "search": "Поиск",
+        "searchHint": "Имя или ID",
+        "apply": "Применить",
+        "exportCsv": "Экспорт CSV",
+        "exportPdf": "Экспорт PDF",
+        "col": {
+            "name": "Имя",
+            "employeeNo": "Табельный №",
+            "time": "Время",
+            "device": "Устройство",
+            "status": "Статус"
+        }
+    },
     "employees": {
         "title": "Сотрудники",
         "addEmployee": "Добавить сотрудника",
@@ -99,7 +117,9 @@
             "fullName": "ФИО"
         },
         "syncButton": "Синх",
-        "syncing": "Синхр..."
+        "syncing": "Синхр...",
+        "esmoSyncButton": "Синх",
+        "esmoSyncing": "Синхр..."
     },
     "devices": {
         "title": "Устройства",

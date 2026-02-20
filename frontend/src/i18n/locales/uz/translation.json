@@ -7,6 +7,7 @@
     "nav": {
         "dashboard": "Boshqaruv",
         "events": "Turniket",
+        "esmo": "ESMO",
         "employees": "Xodimlar",
         "devices": "Qurilmalar",
         "reports": "Hisobotlar",
@@ -77,6 +78,23 @@
             "reason": "Sabab"
         }
     },
+    "esmo": {
+        "title": "ESMO jurnali",
+        "dateFrom": "Sanadan",
+        "dateTo": "Sanagacha",
+        "search": "Qidirish",
+        "searchHint": "Ism yoki ID",
+        "apply": "Qo'llash",
+        "exportCsv": "CSV yuklash",
+        "exportPdf": "PDF yuklash",
+        "col": {
+            "name": "Ism",
+            "employeeNo": "Tabel №",
+            "time": "Vaqt",
+            "device": "Qurilma",
+            "status": "Holat"
+        }
+    },
     "employees": {
         "title": "Xodimlar",
         "addEmployee": "Xodim qo'shish",
@@ -99,7 +117,9 @@
             "fullName": "F.I.O."
         },
         "syncButton": "Sinx",
-        "syncing": "Sinx..."
+        "syncing": "Sinx...",
+        "esmoSyncButton": "Sinx",
+        "esmoSyncing": "Sinx..."
     },
     "devices": {
         "title": "Qurilmalar",
