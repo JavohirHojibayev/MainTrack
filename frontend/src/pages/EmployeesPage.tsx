@@ -84,6 +84,7 @@ export default function EmployeesPage() {
                     background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
                     WebkitBackgroundClip: "text",
                     WebkitTextFillColor: "transparent",
+                    display: "inline-block",
                 }}>{t("employees.title")}</Typography>
             </Box>
 

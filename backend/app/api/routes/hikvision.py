@@ -34,12 +34,12 @@ router = APIRouter()
 
 # Mapping based on user request and iVMS
 DEVICE_IP_MAP = {
-    "192.168.0.223": {"name": "Kirish-1", "direction": EventType.MINE_IN},
-    "192.168.0.221": {"name": "Kirish-2", "direction": EventType.MINE_IN},
-    "192.168.0.219": {"name": "Kirish-3", "direction": EventType.MINE_IN},
-    "192.168.0.224": {"name": "Chiqish-1", "direction": EventType.MINE_OUT},
-    "192.168.0.222": {"name": "Chiqish-2", "direction": EventType.MINE_OUT},
-    "192.168.0.220": {"name": "Chiqish-3", "direction": EventType.MINE_OUT},
+    "192.168.0.223": {"name": "Kirish-1", "direction": EventType.TURNSTILE_IN},
+    "192.168.0.221": {"name": "Kirish-2", "direction": EventType.TURNSTILE_IN},
+    "192.168.0.219": {"name": "Kirish-3", "direction": EventType.TURNSTILE_IN},
+    "192.168.0.224": {"name": "Chiqish-1", "direction": EventType.TURNSTILE_OUT},
+    "192.168.0.222": {"name": "Chiqish-2", "direction": EventType.TURNSTILE_OUT},
+    "192.168.0.220": {"name": "Chiqish-3", "direction": EventType.TURNSTILE_OUT},
 }
 
 
@@ -183,7 +183,7 @@ def _parse_event_xml(xml_body: str) -> dict | None:
 
 
 def _determine_direction(ip_address: str, event_data: dict) -> EventType:
-    """Determine MINE_IN or MINE_OUT from event data or IP mapping."""
+    """Determine TURNSTILE_IN or TURNSTILE_OUT from event data or IP mapping."""
     
     # 1. Check IP mapping first (strongest signal)
     if ip_address in DEVICE_IP_MAP:
@@ -197,15 +197,15 @@ def _determine_direction(ip_address: str, event_data: dict) -> EventType:
     event_desc = str(event_data.get("eventDescription", "")).lower()
 
     if "exit" in event_desc or "out" in event_desc:
-        return EventType.MINE_OUT
+        return EventType.TURNSTILE_OUT
     if "entry" in event_desc or "in" in event_desc:
-        return EventType.MINE_IN
+        return EventType.TURNSTILE_IN
 
     # Reader 2 or even door = OUT
     if reader_no == 2 or (door_no % 2 == 0):
-        return EventType.MINE_OUT
+        return EventType.TURNSTILE_OUT
 
-    return EventType.MINE_IN
+    return EventType.TURNSTILE_IN
 
 
 def _parse_hikvision_time(time_str: str) -> datetime:

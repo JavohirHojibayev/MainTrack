@@ -7,7 +7,8 @@ import { fetchDevices, createDevice, type Device, type DeviceCreate } from "@/ap
 import { useAppTheme } from "@/context/ThemeContext";
 
 const deviceTypes = ["HIKVISION", "ESMO", "TOOL_FACE", "MINE_FACE", "OTHER"];
-const emptyForm: DeviceCreate = { name: "", device_code: "", host: "", device_type: "HIKVISION", location: "", api_key: "" };
+const locationTypes = ["FACTORY", "MINE"];
+const emptyForm: DeviceCreate = { name: "", device_code: "", host: "", device_type: "HIKVISION", location: "FACTORY", api_key: "" };
 
 export default function DevicesPage() {
     const { t } = useTranslation();
@@ -45,6 +46,11 @@ export default function DevicesPage() {
                             {deviceTypes.map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
                         </TextField>
                     </Grid>
+                    <Grid item xs={12} sm={6} md={2}>
+                        <TextField label={t("devices.location")} select required fullWidth value={form.location || "FACTORY"} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}>
+                            {locationTypes.map((v) => <MenuItem key={v} value={v}>{v === "FACTORY" ? t("devices.locationFactory") : t("devices.locationMine")}</MenuItem>)}
+                        </TextField>
+                    </Grid>
                     <Grid item xs={12} sm={6} md={2}><Button type="submit" variant="contained" fullWidth sx={{ height: 40, borderRadius: "50px", textTransform: "none", fontWeight: "bold" }}>{t("devices.create")}</Button></Grid>
                 </Grid>
             </Box>
@@ -56,6 +62,7 @@ export default function DevicesPage() {
                             <TableCell>{t("devices.col.name")}</TableCell>
                             <TableCell>{t("devices.col.host")}</TableCell>
                             <TableCell>{t("devices.col.type")}</TableCell>
+                            <TableCell>{t("devices.col.location")}</TableCell>
                             <TableCell>{t("devices.col.status")}</TableCell>
                         </TableRow>
                     </TableHead>
@@ -68,11 +75,12 @@ export default function DevicesPage() {
                                     <TableCell>{d.name}</TableCell>
                                     <TableCell sx={{ fontFamily: "monospace" }}>{d.host || "—"}</TableCell>
                                     <TableCell>{d.device_type}</TableCell>
+                                    <TableCell>{d.location === "MINE" ? t("devices.locationMine") : t("devices.locationFactory")}</TableCell>
                                     <TableCell><StatusPill status={isOnline ? "ONLINE" : "OFFLINE"} /></TableCell>
                                 </TableRow>
                             );
                         })}
-                        {devices.length === 0 && <TableRow><TableCell colSpan={4} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("devices.noDevices")}</TableCell></TableRow>}
+                        {devices.length === 0 && <TableRow><TableCell colSpan={5} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("devices.noDevices")}</TableCell></TableRow>}
                     </TableBody>
                 </Table>
             </GlassCard>

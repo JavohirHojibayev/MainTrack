@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -283,10 +284,11 @@ def list_events(
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
     employee_no: str | None = Query(default=None),
+    search: str | None = Query(default=None),
     device_id: int | None = Query(default=None),
     event_type: EventType | None = Query(default=None),
     status: EventStatus | None = Query(default=None),
-    limit: int = Query(default=200, ge=1, le=2000),
+    limit: int = Query(default=5000, ge=1, le=10000),
 ) -> list[EventOut]:
     query = db.query(Event)
 
@@ -302,6 +304,15 @@ def list_events(
         query = query.filter(Event.status == status)
     if employee_no:
         query = query.join(Employee).filter(Employee.employee_no.ilike(f"%{employee_no}%"))
+    if search:
+        query = query.join(Employee, isouter=True).filter(
+            or_(
+                Employee.employee_no.ilike(f"%{search}%"),
+                Employee.first_name.ilike(f"%{search}%"),
+                Employee.last_name.ilike(f"%{search}%"),
+                Employee.patronymic.ilike(f"%{search}%"),
+            )
+        )
     
     # Eager load employee for display
     # Eager load employee and device for display

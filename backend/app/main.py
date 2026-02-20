@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import api_router
 from app.core.config import settings
-
 from app.core.device_checker import device_status_worker
 
 logger = logging.getLogger("minetrack")

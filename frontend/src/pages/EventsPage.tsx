@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Box, Typography, TextField, MenuItem, Button, Grid, Drawer, IconButton } from "@mui/material";
+import { Box, Typography, TextField, Button, Grid, Drawer, IconButton } from "@mui/material";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 import CloseIcon from "@mui/icons-material/CloseRounded";
+import DownloadIcon from "@mui/icons-material/DownloadRounded";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfRounded";
 import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { fetchEvents, type EventRow, type EventFilters } from "@/api/events";
 import { useAppTheme } from "@/context/ThemeContext";
-
-const eventTypes = ["", "TURNSTILE_IN", "TURNSTILE_OUT", "ESMO_OK", "ESMO_FAIL", "TOOL_TAKE", "TOOL_RETURN", "MINE_IN", "MINE_OUT"];
-const statuses = ["", "ACCEPTED", "REJECTED"];
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 export default function EventsPage() {
     const { t } = useTranslation();
@@ -23,20 +24,19 @@ export default function EventsPage() {
         {
             field: "full_name",
             headerName: t("events.col.name") || "Name",
-            width: 200,
+            width: 300,
             hideable: false,
             valueGetter: (value, row) => {
                 const parts = [row.last_name, row.first_name, row.patronymic].filter(Boolean);
                 return parts.join(" ");
             }
         },
-        { field: "employee_no", headerName: t("events.col.employeeNo") || "Employee #", width: 120, hideable: false },
-        { field: "event_ts", headerName: t("events.col.time"), width: 180, hideable: false, valueFormatter: (p) => { try { return new Date(p as string).toLocaleString("en-GB"); } catch { return p as string; } } },
-        { field: "event_type", headerName: t("events.col.type"), width: 140, hideable: false },
+        { field: "employee_no", headerName: t("events.col.employeeNo") || "Employee #", width: 160, hideable: false },
+        { field: "event_ts", headerName: t("events.col.time"), width: 220, hideable: false, valueFormatter: (p) => { try { return new Date(p as string).toLocaleString("en-GB"); } catch { return p as string; } } },
         {
             field: "device_name",
             headerName: t("events.col.deviceId") || "Device",
-            width: 150,
+            width: 190,
             hideable: false,
             valueGetter: (value, row) => row.device_name || row.device_id
         },
@@ -46,13 +46,72 @@ export default function EventsPage() {
             width: 130,
             hideable: false,
             renderCell: (p) => {
-                const isMineIn = p.row.event_type === "MINE_IN";
-                const colorStatus = isMineIn && p.value === "ACCEPTED" ? "WARNING" : undefined;
-                return <StatusPill status={p.value} colorStatus={colorStatus} />;
+                const isEntry = p.row.event_type === "TURNSTILE_IN" || p.row.event_type === "MINE_IN";
+                return <StatusPill status={p.value} colorStatus={isEntry ? "WARNING" : undefined} />;
             }
         },
-        { field: "reject_reason", headerName: t("events.col.reason"), flex: 1, hideable: false },
     ];
+
+    const getFullName = (row: EventRow) => [row.last_name, row.first_name, row.patronymic].filter(Boolean).join(" ");
+    const formatTime = (ts: string) => { try { return new Date(ts).toLocaleString("en-GB"); } catch { return ts; } };
+
+    const exportCSV = () => {
+        if (rows.length === 0) return;
+        const header = `${t("events.col.name")};${t("events.col.employeeNo")};${t("events.col.time")};${t("events.col.deviceId")};${t("events.col.status")}\n`;
+        const csvRows = rows.map(r =>
+            `"${getFullName(r)}";"${r.employee_no || ""}";"${formatTime(r.event_ts)}";"${r.device_name || r.device_id}";"${r.status}"`
+        ).join("\n");
+        const blob = new Blob(["\uFEFF" + header + csvRows], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `turnstile_journal_${new Date().toISOString().split('T')[0]}.csv`);
+        link.click();
+    };
+
+    const exportPDF = async () => {
+        if (rows.length === 0) return;
+        const doc = new jsPDF({ orientation: "landscape" });
+
+        // Load Roboto font for Cyrillic support
+        try {
+            const fontRes = await fetch("https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/Roboto/Roboto-Regular.ttf");
+            const buf = await fontRes.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            let binary = "";
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+            const base64 = btoa(binary);
+            doc.addFileToVFS("Roboto.ttf", base64);
+            doc.addFont("Roboto.ttf", "Roboto", "normal");
+            doc.setFont("Roboto");
+        } catch { /* fallback to default font */ }
+
+        doc.setFontSize(16);
+        doc.text(t("events.title"), 14, 18);
+        doc.setFontSize(10);
+        doc.setTextColor(100);
+        doc.text(`${t("events.generated")}: ${new Date().toLocaleString()}`, 14, 25);
+
+        const tableData = rows.map(r => [
+            getFullName(r),
+            r.employee_no || "",
+            formatTime(r.event_ts),
+            r.device_name || String(r.device_id),
+            r.status,
+        ]);
+
+        autoTable(doc, {
+            head: [[t("events.col.name"), t("events.col.employeeNo"), t("events.col.time"), t("events.col.deviceId"), t("events.col.status")]],
+            body: tableData,
+            startY: 30,
+            theme: "grid",
+            headStyles: { fillColor: [59, 130, 246], font: "Roboto" },
+            styles: { fontSize: 9, font: "Roboto" },
+            columnStyles: { 0: { cellWidth: 80 } },
+        });
+
+        doc.save(`turnstile_journal_${new Date().toISOString().split('T')[0]}.pdf`);
+    };
 
     const load = () => { setLoading(true); fetchEvents(filters).then(setRows).catch(() => { }).finally(() => setLoading(false)); };
     useEffect(() => { load(); }, []);
@@ -69,25 +128,31 @@ export default function EventsPage() {
                 display: "inline-block",
                 flexShrink: 0
             }}>{t("events.title")}</Typography>
-            <GlassCard sx={{ mb: 3, p: 2, flexShrink: 0 }}>
-                <Grid container spacing={2} alignItems="center">
-                    <Grid item xs={12} sm={6} md={2}><TextField label={t("events.dateFrom")} type="datetime-local" fullWidth InputLabelProps={{ shrink: true }} onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value ? new Date(e.target.value).toISOString() : undefined }))} /></Grid>
-                    <Grid item xs={12} sm={6} md={2}><TextField label={t("events.dateTo")} type="datetime-local" fullWidth InputLabelProps={{ shrink: true }} onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value ? new Date(e.target.value).toISOString() : undefined }))} /></Grid>
-                    <Grid item xs={12} sm={6} md={2}><TextField label={t("events.employeeNo")} fullWidth onChange={(e) => setFilters((f) => ({ ...f, employee_no: e.target.value || undefined }))} /></Grid>
-                    <Grid item xs={12} sm={6} md={2}>
-                        <TextField label={t("events.eventType")} select fullWidth value={filters.event_type ?? ""} onChange={(e) => setFilters((f) => ({ ...f, event_type: e.target.value || undefined }))}>
-                            {eventTypes.map((v) => <MenuItem key={v} value={v}>{v || t("events.all")}</MenuItem>)}
-                        </TextField>
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={2}>
-                        <TextField label={t("events.status")} select fullWidth value={filters.status ?? ""} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value || undefined }))}>
-                            {statuses.map((v) => <MenuItem key={v} value={v}>{v || t("events.all")}</MenuItem>)}
-                        </TextField>
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={2}><Button variant="contained" fullWidth onClick={load} sx={{ height: 40 }}>{t("events.apply")}</Button></Grid>
-                </Grid>
-            </GlassCard>
-            <GlassCard sx={{ p: 0, flex: 1, minWidth: 0, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
+            <Box sx={{ mb: 4, display: "flex", gap: 2, alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
+                <TextField label={t("events.dateFrom")} type="date" InputLabelProps={{ shrink: true }} sx={{ minWidth: 160 }} onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value ? new Date(e.target.value).toISOString() : undefined }))} />
+                <TextField label={t("events.dateTo")} type="date" InputLabelProps={{ shrink: true }} sx={{ minWidth: 160 }} onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value ? new Date(e.target.value + "T23:59:59").toISOString() : undefined }))} />
+                <TextField label={t("events.search")} placeholder={t("events.searchHint")} sx={{ minWidth: 200 }} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value || undefined }))} />
+                <Button variant="contained" onClick={load} sx={{ height: 40, minWidth: 100, borderRadius: "50px", textTransform: "none", fontWeight: "bold", whiteSpace: "nowrap" }}>{t("events.apply")}</Button>
+                <Button
+                    variant="contained"
+                    startIcon={<DownloadIcon />}
+                    onClick={exportCSV}
+                    disabled={rows.length === 0 || loading}
+                    sx={{ height: 40, borderRadius: "50px", textTransform: "none", fontWeight: "bold", whiteSpace: "nowrap", background: "linear-gradient(135deg, #06b6d4, #3b82f6)", "&:hover": { background: "linear-gradient(135deg, #0891b2, #2563eb)" } }}
+                >
+                    {t("events.exportCsv")}
+                </Button>
+                <Button
+                    variant="contained"
+                    startIcon={<PictureAsPdfIcon />}
+                    onClick={exportPDF}
+                    disabled={rows.length === 0 || loading}
+                    sx={{ height: 40, borderRadius: "50px", textTransform: "none", fontWeight: "bold", whiteSpace: "nowrap", background: "linear-gradient(135deg, #06b6d4, #3b82f6)", "&:hover": { background: "linear-gradient(135deg, #0891b2, #2563eb)" } }}
+                >
+                    {t("events.exportPdf")}
+                </Button>
+            </Box>
+            <GlassCard sx={{ p: 0, flex: 1, width: "fit-content", minWidth: 1020, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
                 <DataGrid
                     rows={rows} columns={columns} loading={loading}
                     pageSizeOptions={[25, 50, 100]}

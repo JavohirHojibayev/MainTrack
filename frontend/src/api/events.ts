@@ -13,12 +13,15 @@ export interface EventRow {
     employee_no?: string;
     first_name?: string;
     last_name?: string;
+    patronymic?: string;
+    device_name?: string;
 }
 
 export interface EventFilters {
     date_from?: string;
     date_to?: string;
     employee_no?: string;
+    search?: string;
     device_id?: number;
     event_type?: string;
     status?: string;
@@ -31,6 +34,7 @@ export async function fetchEvents(filters: EventFilters = {}): Promise<EventRow[
     if (filters.date_from) params.set("date_from", filters.date_from);
     if (filters.date_to) params.set("date_to", filters.date_to);
     if (filters.employee_no) params.set("employee_no", filters.employee_no);
+    if (filters.search) params.set("search", filters.search);
     if (filters.device_id) params.set("device_id", String(filters.device_id));
     if (filters.event_type) params.set("event_type", filters.event_type);
     if (filters.status) params.set("status", filters.status);

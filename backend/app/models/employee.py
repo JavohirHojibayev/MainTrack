@@ -23,3 +23,4 @@ class Employee(Base):
 
     external_ids = relationship("EmployeeExternalID", back_populates="employee", cascade="all, delete-orphan")
     events = relationship("Event", back_populates="employee")
+    exams = relationship("MedicalExam", back_populates="employee", cascade="all, delete-orphan")

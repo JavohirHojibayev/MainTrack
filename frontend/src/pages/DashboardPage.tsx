@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Box, Grid, Typography, Table, TableBody, TableCell, TableHead, TableRow, TablePagination } from "@mui/material";
+import { Box, Grid, Typography, Table, TableBody, TableCell, TableHead, TableRow, TablePagination, TableContainer } from "@mui/material";
 import PeopleIcon from "@mui/icons-material/PeopleRounded";
 import MedicalIcon from "@mui/icons-material/MonitorHeartRounded";
 import BuildIcon from "@mui/icons-material/BuildRounded";
 import BlockIcon from "@mui/icons-material/BlockRounded";
+import Link from "@mui/material/Link";
 import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
+import { MedicalExamList } from "@/components/MedicalExamList";
 import { useAppTheme } from "@/context/ThemeContext";
 import { fetchDailyMineSummary, fetchToolDebts, fetchBlockedAttempts, fetchEsmoSummary, type DailySummaryRow, type ToolDebtRow, type BlockedRow } from "@/api/dashboard";
 
@@ -99,7 +101,7 @@ export default function DashboardPage() {
                 <Grid item xs={12} sm={6} md={3}>
                     <KpiCard
                         icon={<PeopleIcon />}
-                        label={`${t("dashboard.statusInside")} / ${t("dashboard.statusOutside")}`}
+                        label={t("dashboard.factoryInsideOutside")}
                         value={
                             <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                                 <Box component="span" sx={{ color: "#f59e0b !important" }}>{insideCount}</Box>
@@ -117,34 +119,38 @@ export default function DashboardPage() {
             <Grid container spacing={2}>
                 <Grid item xs={12} md={8}>
                     <GlassCard>
-                        <Typography variant="h6" sx={{ mb: 2, color: tokens.status.ok, fontWeight: 700 }}>{t("dashboard.dailyActivity")}</Typography>
-                        <Table size="small">
-                            <TableHead>
-                                <TableRow>
-                                    <TableCell>{t("dashboard.employee")}</TableCell>
-                                    <TableCell>{t("dashboard.name")}</TableCell>
-                                    <TableCell>{t("dashboard.status")}</TableCell>
-                                    <TableCell>{t("dashboard.entered")}</TableCell>
-                                    <TableCell>{t("dashboard.exited")}</TableCell>
-                                    <TableCell>{t("dashboard.duration")}</TableCell>
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {summary
-                                    .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                                    .map((r) => (
-                                        <TableRow key={r.employee_no}>
-                                            <TableCell>{r.employee_no}</TableCell>
-                                            <TableCell>{r.full_name}</TableCell>
-                                            <TableCell><StatusPill status={r.is_inside ? t("dashboard.statusInside") : t("dashboard.statusOutside")} colorStatus={r.is_inside ? "INSIDE" : "OUTSIDE"} /></TableCell>
-                                            <TableCell>{fmt(r.last_in)}</TableCell>
-                                            <TableCell>{fmt(r.last_out)}</TableCell>
-                                            <TableCell>{dur(r.total_minutes)}</TableCell>
-                                        </TableRow>
-                                    ))}
-                                {summary.length === 0 && <TableRow><TableCell colSpan={6} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.noData")}</TableCell></TableRow>}
-                            </TableBody>
-                        </Table>
+                        <Box sx={{ mb: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <Typography variant="h6" sx={{ color: tokens.status.ok, fontWeight: 700 }}>{t("dashboard.factoryActivity")}</Typography>
+                        </Box>
+                        <TableContainer sx={{ maxHeight: 400 }}>
+                            <Table size="small" stickyHeader>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell>{t("dashboard.employee")}</TableCell>
+                                        <TableCell>{t("dashboard.name")}</TableCell>
+                                        <TableCell>{t("dashboard.status")}</TableCell>
+                                        <TableCell>{t("dashboard.entered")}</TableCell>
+                                        <TableCell>{t("dashboard.exited")}</TableCell>
+                                        <TableCell>{t("dashboard.duration")}</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {summary
+                                        .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                                        .map((r) => (
+                                            <TableRow key={r.employee_no} hover>
+                                                <TableCell>{r.employee_no}</TableCell>
+                                                <TableCell>{r.full_name}</TableCell>
+                                                <TableCell><StatusPill status={r.is_inside ? t("dashboard.statusInside") : t("dashboard.statusOutside")} colorStatus={r.is_inside ? "INSIDE" : "OUTSIDE"} /></TableCell>
+                                                <TableCell>{fmt(r.last_in)}</TableCell>
+                                                <TableCell>{fmt(r.last_out)}</TableCell>
+                                                <TableCell>{dur(r.total_minutes)}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    {summary.length === 0 && <TableRow><TableCell colSpan={6} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.noData")}</TableCell></TableRow>}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
                         <TablePagination
                             rowsPerPageOptions={[10, 25, 50]}
                             component="div"
@@ -160,7 +166,10 @@ export default function DashboardPage() {
                     </GlassCard>
                 </Grid>
                 <Grid item xs={12} md={4}>
-                    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        {/* Medical Exams Widget */}
+                        <MedicalExamList />
+
                         <GlassCard>
                             <Typography variant="h6" sx={{ mb: 2, color: tokens.status.warning, fontWeight: 700 }}>{t("dashboard.toolDebts")}</Typography>
                             <Table size="small">
@@ -182,31 +191,6 @@ export default function DashboardPage() {
                                 onRowsPerPageChange={(e) => {
                                     setDebtsRowsPerPage(parseInt(e.target.value, 10));
                                     setDebtsPage(0);
-                                }}
-                                sx={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
-                            />
-                        </GlassCard>
-                        <GlassCard>
-                            <Typography variant="h6" sx={{ mb: 2, color: tokens.status.blocked, fontWeight: 700 }}>{t("dashboard.blockedAttempts")}</Typography>
-                            <Table size="small">
-                                <TableHead><TableRow><TableCell>{t("dashboard.time")}</TableCell><TableCell>{t("dashboard.reason")}</TableCell></TableRow></TableHead>
-                                <TableBody>
-                                    {blocked
-                                        .slice(blockedPage * blockedRowsPerPage, blockedPage * blockedRowsPerPage + blockedRowsPerPage)
-                                        .map((r, i) => <TableRow key={i}><TableCell>{fmt(r.event_ts)}</TableCell><TableCell sx={{ color: tokens.status.blocked }}>{r.reject_reason}</TableCell></TableRow>)}
-                                    {blocked.length === 0 && <TableRow><TableCell colSpan={2} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.clear")}</TableCell></TableRow>}
-                                </TableBody>
-                            </Table>
-                            <TablePagination
-                                rowsPerPageOptions={[5, 10, 25]}
-                                component="div"
-                                count={blocked.length}
-                                rowsPerPage={blockedRowsPerPage}
-                                page={blockedPage}
-                                onPageChange={(e, p) => setBlockedPage(p)}
-                                onRowsPerPageChange={(e) => {
-                                    setBlockedRowsPerPage(parseInt(e.target.value, 10));
-                                    setBlockedPage(0);
                                 }}
                                 sx={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
                             />

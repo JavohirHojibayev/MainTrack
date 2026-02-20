@@ -62,8 +62,8 @@ def inside_mine(
     subq = (
         db.query(
             Event.employee_id.label("employee_id"),
-            func.max(case((Event.event_type == EventType.MINE_IN, Event.event_ts), else_=None)).label("last_in"),
-            func.max(case((Event.event_type.in_([EventType.MINE_OUT, EventType.TURNSTILE_OUT]), Event.event_ts), else_=None)).label("last_out"),
+            func.max(case((Event.event_type == EventType.TURNSTILE_IN, Event.event_ts), else_=None)).label("last_in"),
+            func.max(case((Event.event_type.in_([EventType.TURNSTILE_OUT]), Event.event_ts), else_=None)).label("last_out"),
         )
         .filter(Event.status == EventStatus.ACCEPTED)
         .group_by(Event.employee_id)
@@ -153,7 +153,7 @@ def daily_mine_summary(
         db.query(Event)
         .filter(
             Event.status == EventStatus.ACCEPTED,
-            Event.event_type.in_([EventType.MINE_IN, EventType.MINE_OUT, EventType.TURNSTILE_OUT]),
+            Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]),
             Event.event_ts >= query_start,
             Event.event_ts <= end + timedelta(days=1),
         )
@@ -183,11 +183,11 @@ def daily_mine_summary(
         if is_today:
             entry["has_activity_today"] = True
 
-        if ev.event_type == EventType.MINE_IN:
+        if ev.event_type == EventType.TURNSTILE_IN:
             current_in[emp_id] = ev.event_ts
             entry["last_in"] = ev.event_ts
             entry["is_inside"] = True
-        elif ev.event_type in [EventType.MINE_OUT, EventType.TURNSTILE_OUT]:
+        elif ev.event_type in [EventType.TURNSTILE_OUT]:
             # Only record as exit if they were arguably inside or we are just tracking the last exit event
             # If they have multiple outs, we just update last_out
             entry["last_out"] = ev.event_ts
