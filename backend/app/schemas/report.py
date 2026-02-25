@@ -26,6 +26,8 @@ class MineWorkSummaryItem(BaseModel):
     last_in: datetime | None = None
     last_out: datetime | None = None
     is_inside: bool = False
+    entered_today: bool = False
+    exited_today: bool = False
 
 
 class ReportSummary(BaseModel):
@@ -38,3 +40,10 @@ class ReportSummary(BaseModel):
     mine_in: int
     mine_out: int
     blocked: int
+
+
+class EsmoSummary24h(BaseModel):
+    passed: int
+    failed: int
+    review: int
+    total: int

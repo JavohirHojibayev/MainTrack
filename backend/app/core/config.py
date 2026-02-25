@@ -18,6 +18,18 @@ class Settings(BaseSettings):
     TOKEN_ALGORITHM: str = "HS256"
 
     ESMO_OK_WINDOW_HOURS: int = 6
+    TURNSTILE_DEDUP_SECONDS: int = 20
+
+    # ESMO (read-only polling)
+    ESMO_ENABLED: bool = True
+    ESMO_BASE_URL: str = "https://192.168.8.10/cab/"
+    ESMO_USER: str = "admin"
+    ESMO_PASS: str = "QW1665gety"
+    ESMO_POLL_INTERVAL: int = 30
+    ESMO_REQUEST_TIMEOUT: int = 20
+    ESMO_LOGIN_RETRIES: int = 2
+    ESMO_EMPLOYEE_PREVIEW_PAGES: int = 1
+    ESMO_EMPLOYEE_SYNC_PAGES: int = 100
 
     # Hikvision Turnstile (read-only polling)
     HIKVISION_USER: str = "admin"

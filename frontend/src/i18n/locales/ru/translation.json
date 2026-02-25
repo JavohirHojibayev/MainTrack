@@ -24,7 +24,7 @@
     "dashboard": {
         "title": "Панель управления",
         "insideMine": "В шахте",
-        "esmoOkToday": "ЭСМО ОК сегодня",
+        "esmoOkToday": "ESMO",
         "toolDebts": "Задолженности",
         "blockedAttempts": "Заблокировано",
         "employee": "Сотрудник",
@@ -92,6 +92,9 @@
             "employeeNo": "Табельный №",
             "time": "Время",
             "device": "Устройство",
+            "pressure": "Давление",
+            "pulse": "Пульс",
+            "temperature": "Темп.",
             "status": "Статус"
         }
     },
@@ -193,9 +196,13 @@
         "pending": "Ожидание",
         "duplicate": "Дубликат",
         "error": "Ошибка",
-        "fail": "Отказ"
+        "fail": "Отказ",
+        "passed": "пройден",
+        "failed": "отказ",
+        "review": "осмотр"
     },
     "common": {
-        "noData": "—"
+        "noData": "—",
+        "sync": "Синх"
     }
 }

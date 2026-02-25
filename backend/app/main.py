@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import api_router
 from app.core.config import settings
 from app.core.device_checker import device_status_worker
+from app.core.esmo_poller import esmo_polling_loop
+from app.core.hikvision_poller import hikvision_polling_loop
 
 logger = logging.getLogger("minetrack")
 
@@ -17,15 +19,27 @@ async def lifespan(application: FastAPI):
     """Startup / shutdown lifecycle."""
     logger.info("Hikvision webhook mode active — turnstiles push events to /api/v1/hikvision/webhook")
     
-    # Start device status background checker
+    # Start background tasks
     checker_task = asyncio.create_task(device_status_worker())
+    hikvision_task = asyncio.create_task(hikvision_polling_loop())
+    esmo_task = None
+    if settings.ESMO_ENABLED:
+        esmo_task = asyncio.create_task(esmo_polling_loop())
+    else:
+        logger.warning("ESMO polling is disabled (ESMO_ENABLED=false)")
     
     yield
     
     # Clean up
     checker_task.cancel()
+    hikvision_task.cancel()
+    if esmo_task:
+        esmo_task.cancel()
     try:
-        await checker_task
+        tasks = [checker_task, hikvision_task]
+        if esmo_task:
+            tasks.append(esmo_task)
+        await asyncio.gather(*tasks, return_exceptions=True)
     except asyncio.CancelledError:
         pass
 

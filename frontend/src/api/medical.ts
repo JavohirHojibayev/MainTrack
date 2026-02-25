@@ -13,8 +13,10 @@ export interface MedicalExam {
     timestamp: string;
     employee?: {
         id: number;
+        employee_no: string;
         first_name: string;
         last_name: string;
+        patronymic?: string;
     };
 }
 
@@ -25,13 +27,23 @@ export interface MedicalStats {
     failed: number;
 }
 
-export async function fetchMedicalExams(params?: any): Promise<MedicalExam[]> {
+export interface MedicalExamFilters {
+    skip?: number;
+    limit?: number;
+    employee_id?: number;
+    result?: string;
+    start_date?: string;
+    end_date?: string;
+    search?: string;
+}
+
+export async function fetchMedicalExams(params?: MedicalExamFilters): Promise<MedicalExam[]> {
     let query = "";
     if (params) {
         const searchParams = new URLSearchParams();
-        Object.keys(params).forEach(key => {
-            if (params[key] !== undefined && params[key] !== null) {
-                searchParams.append(key, params[key]);
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null && value !== "") {
+                searchParams.append(key, String(value));
             }
         });
         query = "?" + searchParams.toString();
@@ -39,6 +51,28 @@ export async function fetchMedicalExams(params?: any): Promise<MedicalExam[]> {
     return apiClient.get("/medical/exams" + query);
 }
 
-export async function fetchMedicalStats(): Promise<MedicalStats> {
-    return apiClient.get("/medical/stats");
+export async function fetchMedicalStats(targetDate?: string): Promise<MedicalStats> {
+    const query = targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : "";
+    return apiClient.get("/medical/stats" + query);
+}
+
+export async function syncMedicalExams(): Promise<{ status: string; new_exams_count: number }> {
+    return apiClient.post("/medical/sync-exams", {});
+}
+
+export interface EsmoEmployee {
+    id: string | number;
+    pass_id: string;
+    full_name: string;
+    organization: string;
+    department: string;
+    position: string;
+}
+
+export async function fetchEsmoEmployees(): Promise<EsmoEmployee[]> {
+    return apiClient.get("/medical/esmo-employees");
+}
+
+export async function syncEsmoEmployees(): Promise<EsmoEmployee[]> {
+    return apiClient.post("/medical/sync-employees", {});
 }

@@ -16,7 +16,7 @@ from app.models.device import Device
 from app.models.employee import Employee
 from app.models.employee_external_id import EmployeeExternalID
 from app.models.event import Event, EventStatus, EventType
-from app.schemas.event import EventIngestRequest, EventOut, EventResult
+from app.schemas.event import EventIngestRequest, EventOut, EventResult, EventPageOut
 
 router = APIRouter()
 
@@ -287,6 +287,7 @@ def list_events(
     search: str | None = Query(default=None),
     device_id: int | None = Query(default=None),
     event_type: EventType | None = Query(default=None),
+    turnstile_only: bool = Query(default=False),
     status: EventStatus | None = Query(default=None),
     limit: int = Query(default=5000, ge=1, le=10000),
 ) -> list[EventOut]:
@@ -300,6 +301,8 @@ def list_events(
         query = query.filter(Event.device_id == device_id)
     if event_type:
         query = query.filter(Event.event_type == event_type)
+    if turnstile_only and not event_type:
+        query = query.filter(Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]))
     if status:
         query = query.filter(Event.status == status)
     if employee_no:
@@ -319,3 +322,55 @@ def list_events(
     query = query.options(joinedload(Event.employee), joinedload(Event.device))
 
     return query.order_by(Event.event_ts.desc()).limit(limit).all()
+
+
+@router.get("/paged", response_model=EventPageOut)
+def list_events_paged(
+    db: Session = Depends(get_db),
+    _: Any = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    employee_no: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    device_id: int | None = Query(default=None),
+    event_type: EventType | None = Query(default=None),
+    turnstile_only: bool = Query(default=False),
+    status: EventStatus | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=25, ge=1, le=500),
+) -> EventPageOut:
+    query = db.query(Event)
+
+    if date_from:
+        query = query.filter(Event.event_ts >= _ensure_utc(date_from))
+    if date_to:
+        query = query.filter(Event.event_ts <= _ensure_utc(date_to))
+    if device_id:
+        query = query.filter(Event.device_id == device_id)
+    if event_type:
+        query = query.filter(Event.event_type == event_type)
+    if turnstile_only and not event_type:
+        query = query.filter(Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]))
+    if status:
+        query = query.filter(Event.status == status)
+    if employee_no:
+        query = query.join(Employee).filter(Employee.employee_no.ilike(f"%{employee_no}%"))
+    if search:
+        query = query.join(Employee, isouter=True).filter(
+            or_(
+                Employee.employee_no.ilike(f"%{search}%"),
+                Employee.first_name.ilike(f"%{search}%"),
+                Employee.last_name.ilike(f"%{search}%"),
+                Employee.patronymic.ilike(f"%{search}%"),
+            )
+        )
+
+    total = query.count()
+    items = (
+        query.options(joinedload(Event.employee), joinedload(Event.device))
+        .order_by(Event.event_ts.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return EventPageOut(items=items, total=total)

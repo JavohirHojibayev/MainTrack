@@ -12,6 +12,7 @@ class MedicalExam(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    esmo_id = Column(Integer, unique=True, nullable=True, index=True)
     
     # Exam details
     terminal_name = Column(String(64), nullable=True)

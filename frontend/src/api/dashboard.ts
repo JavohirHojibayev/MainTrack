@@ -17,14 +17,22 @@ export async function fetchInsideMine(): Promise<InsideMineRow[]> {
     return apiClient.get("/reports/inside-mine");
 }
 
-export async function fetchToolDebts(): Promise<ToolDebtRow[]> {
+export async function fetchToolDebts(day?: string): Promise<ToolDebtRow[]> {
     if (apiClient.useMocks) return mocks.mockToolDebts;
-    return apiClient.get("/reports/tool-debts");
+    const query = day ? `?day=${encodeURIComponent(day)}` : "";
+    return apiClient.get(`/reports/tool-debts${query}`);
 }
 
-export async function fetchBlockedAttempts(): Promise<BlockedRow[]> {
+export async function fetchBlockedAttempts(day?: string): Promise<BlockedRow[]> {
     if (apiClient.useMocks) return mocks.mockBlocked;
-    return apiClient.get("/reports/blocked-attempts");
+    const query = day ? `?day=${encodeURIComponent(day)}` : "";
+    return apiClient.get(`/reports/blocked-attempts${query}`);
+}
+
+export async function fetchBlockedAttemptsCount(day?: string): Promise<number> {
+    if (apiClient.useMocks) return mocks.mockBlocked.length;
+    const query = day ? `?day=${encodeURIComponent(day)}` : "";
+    return apiClient.get(`/reports/blocked-attempts-count${query}`);
 }
 
 export interface DailySummaryRow {
@@ -34,6 +42,8 @@ export interface DailySummaryRow {
     last_in: string | null;
     last_out: string | null;
     is_inside: boolean;
+    entered_today?: boolean;
+    exited_today?: boolean;
 }
 
 export async function fetchDailyMineSummary(day: string): Promise<DailySummaryRow[]> {
@@ -42,4 +52,19 @@ export async function fetchDailyMineSummary(day: string): Promise<DailySummaryRo
 
 export async function fetchEsmoSummary(day: string): Promise<number> {
     return apiClient.get(`/reports/esmo-summary?day=${day}`);
+}
+
+export interface EsmoSummary24h {
+    passed: number;
+    failed: number;
+    review: number;
+    total: number;
+}
+
+export async function fetchEsmoSummary24h(day?: string): Promise<EsmoSummary24h> {
+    if (apiClient.useMocks) {
+        return { passed: 0, failed: 0, review: 0, total: 0 };
+    }
+    const query = day ? `?day=${encodeURIComponent(day)}` : "";
+    return apiClient.get(`/reports/esmo-summary-24h${query}`);
 }

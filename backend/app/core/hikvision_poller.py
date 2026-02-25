@@ -33,6 +33,17 @@ from app.models.event import Event, EventStatus, EventType
 
 logger = logging.getLogger("hikvision.poller")
 
+DEVICE_IP_MAP = {
+    "192.168.0.223": EventType.TURNSTILE_IN,
+    "192.168.0.221": EventType.TURNSTILE_IN,
+    "192.168.0.219": EventType.TURNSTILE_IN,
+    "192.168.0.224": EventType.TURNSTILE_OUT,
+    "192.168.0.222": EventType.TURNSTILE_OUT,
+    "192.168.0.220": EventType.TURNSTILE_OUT,
+}
+
+DEDUP_SECONDS = max(settings.TURNSTILE_DEDUP_SECONDS, 1)
+
 
 def _parse_devices() -> list[dict]:
     """Parse HIKVISION_DEVICES from settings (JSON string)."""
@@ -50,9 +61,13 @@ def _get_or_create_device(db: Session, device_info: dict) -> Device | None:
     host = device_info.get("host", "")
     name = device_info.get("name", host)
     device_code = f"HIK_{host.replace('.', '_')}"
+    now = datetime.now(timezone.utc)
 
     device = db.query(Device).filter(Device.device_code == device_code).first()
     if device:
+        device.last_seen = now
+        if host and not device.host:
+            device.host = host
         return device
 
     # Create new device in MineTrack DB
@@ -63,6 +78,8 @@ def _get_or_create_device(db: Session, device_info: dict) -> Device | None:
         location=name,
         api_key=f"hikvision_{device_code}",
         is_active=True,
+        host=host or None,
+        last_seen=now,
     )
     db.add(device)
     try:
@@ -97,8 +114,17 @@ def _find_employee_by_hikvision_id(db: Session, employee_no: str) -> Employee | 
     return db.query(Employee).filter(Employee.employee_no == employee_no).first()
 
 
-def _determine_event_type(event_data: dict) -> EventType:
+def _determine_event_type(event_data: dict, host: str, device_name: str) -> EventType:
     """Determine TURNSTILE_IN or TURNSTILE_OUT from Hikvision event data."""
+    if host in DEVICE_IP_MAP:
+        return DEVICE_IP_MAP[host]
+
+    name_l = (device_name or "").lower()
+    if "kirish" in name_l or "entry" in name_l:
+        return EventType.TURNSTILE_IN
+    if "chiqish" in name_l or "exit" in name_l:
+        return EventType.TURNSTILE_OUT
+
     # Hikvision major=5 (Access Control), minor types:
     # 75 = Face Authentication Passed (IN)
     # 76 = Face Auth Failed
@@ -166,11 +192,20 @@ def poll_single_device(device_info: dict) -> int:
             return 0
 
         for evt_data in events:
-            raw_id = str(evt_data.get("serialNo", evt_data.get("time", "")))
+            event_time_raw = str(evt_data.get("time", ""))
+
+            # Check duplicate (by device_id + raw_id)
+            # Find employee
+            employee_no = str(evt_data.get("employeeNoString", evt_data.get("cardNo", "")))
+            if not employee_no:
+                continue
+
+            raw_id = str(evt_data.get("serialNo", "")).strip()
+            if not raw_id:
+                raw_id = f"{employee_no}:{event_time_raw}:{host}"
             if not raw_id:
                 continue
 
-            # Check duplicate (by device_id + raw_id)
             existing = (
                 db.query(Event)
                 .filter(Event.device_id == device.id, Event.raw_id == raw_id)
@@ -179,22 +214,36 @@ def poll_single_device(device_info: dict) -> int:
             if existing:
                 continue
 
-            # Find employee
-            employee_no = str(evt_data.get("employeeNoString", evt_data.get("cardNo", "")))
-            if not employee_no:
-                continue
-
             employee = _find_employee_by_hikvision_id(db, employee_no)
             if not employee:
                 logger.debug("Employee not found for Hikvision ID: %s", employee_no)
+                continue
+
+            event_ts = _parse_hikvision_time(event_time_raw)
+            event_type = _determine_event_type(evt_data, host, device.name if device else name)
+
+            # Debounce repeated reads from the same passage.
+            dup = (
+                db.query(Event)
+                .filter(
+                    Event.device_id == device.id,
+                    Event.employee_id == employee.id,
+                    Event.event_type == event_type,
+                    Event.status == EventStatus.ACCEPTED,
+                    Event.event_ts >= event_ts - timedelta(seconds=DEDUP_SECONDS),
+                    Event.event_ts <= event_ts + timedelta(seconds=DEDUP_SECONDS),
+                )
+                .first()
+            )
+            if dup:
                 continue
 
             # Create event in MineTrack DB
             event = Event(
                 device_id=device.id,
                 employee_id=employee.id,
-                event_type=_determine_event_type(evt_data),
-                event_ts=_parse_hikvision_time(str(evt_data.get("time", ""))),
+                event_type=event_type,
+                event_ts=event_ts,
                 raw_id=raw_id,
                 status=EventStatus.ACCEPTED,
                 source_payload=evt_data,

@@ -8,12 +8,26 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_db
 from app.core.rbac import require_roles
+from app.core.esmo_poller import get_allowed_esmo_terminal_names
 from app.models.employee import Employee
 from app.models.user import User
 from app.models.event import Event, EventStatus, EventType
-from app.schemas.report import InsideMineItem, MineWorkSummaryItem, ToolDebtItem, ReportSummary
+from app.models.medical_exam import MedicalExam
+from app.schemas.report import InsideMineItem, MineWorkSummaryItem, ToolDebtItem, ReportSummary, EsmoSummary24h
 
 router = APIRouter()
+
+
+def _current_local_day() -> date:
+    tz_local = timezone(timedelta(hours=5))
+    return datetime.now(tz_local).date()
+
+
+def _local_day_bounds(day: date) -> tuple[datetime, datetime]:
+    tz_local = timezone(timedelta(hours=5))
+    start_local = datetime(day.year, day.month, day.day, tzinfo=tz_local)
+    end_local = start_local + timedelta(days=1)
+    return start_local, end_local
 
 
 @router.get("/summary", response_model=ReportSummary)
@@ -100,6 +114,7 @@ def inside_mine(
 
 @router.get("/tool-debts", response_model=list[ToolDebtItem])
 def tool_debts(
+    day: date | None = Query(default=None, description="YYYY-MM-DD (optional, daily filter)"),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
 ) -> list[ToolDebtItem]:
@@ -114,13 +129,18 @@ def tool_debts(
         .subquery()
     )
 
-    rows = (
+    rows_query = (
         db.query(Employee, subq.c.last_take, subq.c.last_return)
         .join(subq, subq.c.employee_id == Employee.id)
         .filter(subq.c.last_take.isnot(None))
         .filter((subq.c.last_return.is_(None)) | (subq.c.last_take > subq.c.last_return))
-        .all()
     )
+
+    if day is not None:
+        start, end = _local_day_bounds(day)
+        rows_query = rows_query.filter(subq.c.last_take >= start, subq.c.last_take < end)
+
+    rows = rows_query.all()
 
     result: list[ToolDebtItem] = []
     for emp, last_take, _last_return in rows:
@@ -173,7 +193,10 @@ def daily_mine_summary(
                 "last_out": None,
                 "is_inside": False,
                 # Track if they have activity TODAY so we filter correctly
-                "has_activity_today": False
+                "has_activity_today": False,
+                # Daily counters for dashboard KPI (entered/exited today)
+                "has_in_today": False,
+                "has_out_today": False,
             }
         
         entry = summary[emp_id]
@@ -184,10 +207,14 @@ def daily_mine_summary(
             entry["has_activity_today"] = True
 
         if ev.event_type == EventType.TURNSTILE_IN:
+            if is_today:
+                entry["has_in_today"] = True
             current_in[emp_id] = ev.event_ts
             entry["last_in"] = ev.event_ts
             entry["is_inside"] = True
         elif ev.event_type in [EventType.TURNSTILE_OUT]:
+            if is_today:
+                entry["has_out_today"] = True
             # Only record as exit if they were arguably inside or we are just tracking the last exit event
             # If they have multiple outs, we just update last_out
             entry["last_out"] = ev.event_ts
@@ -206,16 +233,13 @@ def daily_mine_summary(
     employees = db.query(Employee).filter(Employee.id.in_(list(summary.keys()))).all()
     by_id = {emp.id: emp for emp in employees}
 
-    cutoff_inside = start - timedelta(hours=12)
-
     result: list[MineWorkSummaryItem] = []
     for emp_id, data in summary.items():
         is_active_today = data["has_activity_today"]
-        is_inside_from_recent = data["is_inside"] and data["last_in"] and data["last_in"] >= cutoff_inside
 
-        # Only include if they have activity today OR are currently inside from a recent shift (e.g. night shift)
-        if not (is_active_today or is_inside_from_recent):
-             continue
+        # Dashboard daily table must show only events from the requested calendar day.
+        if not is_active_today:
+            continue
 
         emp = by_id.get(emp_id)
         if not emp:
@@ -256,6 +280,8 @@ def daily_mine_summary(
                 last_in=data["last_in"],
                 last_out=final_last_out,
                 is_inside=data["is_inside"],
+                entered_today=bool(data.get("has_in_today")),
+                exited_today=bool(data.get("has_out_today")),
             )
         )
     return result
@@ -263,17 +289,17 @@ def daily_mine_summary(
 
 @router.get("/blocked-attempts", response_model=list[dict])
 def blocked_attempts(
+    day: date | None = Query(default=None, description="YYYY-MM-DD (optional, daily filter)"),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
     limit: int = Query(default=200, ge=1, le=2000),
 ) -> list[dict]:
-    events = (
-        db.query(Event)
-        .filter(Event.status == EventStatus.REJECTED)
-        .order_by(Event.event_ts.desc())
-        .limit(limit)
-        .all()
-    )
+    query = db.query(Event).filter(Event.status == EventStatus.REJECTED)
+    if day is not None:
+        start, end = _local_day_bounds(day)
+        query = query.filter(Event.event_ts >= start, Event.event_ts < end)
+
+    events = query.order_by(Event.event_ts.desc()).limit(limit).all()
     result: list[dict] = []
     for ev in events:
         result.append(
@@ -288,6 +314,27 @@ def blocked_attempts(
             }
         )
     return result
+
+
+@router.get("/blocked-attempts-count", response_model=int)
+def blocked_attempts_count(
+    day: date | None = Query(default=None, description="YYYY-MM-DD (optional, daily filter)"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
+) -> int:
+    if day is None:
+        day = _current_local_day()
+    start, end = _local_day_bounds(day)
+    count = (
+        db.query(func.count(Event.id))
+        .filter(
+            Event.status == EventStatus.REJECTED,
+            Event.event_ts >= start,
+            Event.event_ts < end,
+        )
+        .scalar()
+    )
+    return int(count or 0)
 
 
 @router.get("/esmo-summary", response_model=int)
@@ -311,3 +358,49 @@ def esmo_summary(
         .scalar()
     )
     return count or 0
+
+
+@router.get("/esmo-summary-24h", response_model=EsmoSummary24h)
+def esmo_summary_24h(
+    day: date | None = Query(default=None, description="YYYY-MM-DD (optional, local day)"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
+) -> EsmoSummary24h:
+    """
+    Return ESMO results for the current local calendar day (Tashkent time).
+    """
+    if day is None:
+        day = _current_local_day()
+
+    tz_local = timezone(timedelta(hours=5))
+    start_local = datetime(day.year, day.month, day.day, tzinfo=tz_local)
+    end_local = start_local + timedelta(days=1)
+
+    # Exams are stored in UTC in DB; compare by UTC window for the local day.
+    start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+    rows = (
+        db.query(MedicalExam.result)
+        .filter(
+            MedicalExam.timestamp >= start_utc,
+            MedicalExam.timestamp < end_utc,
+            MedicalExam.terminal_name.in_(get_allowed_esmo_terminal_names()),
+        )
+        .all()
+    )
+
+    passed = 0
+    failed = 0
+    review = 0
+    for (raw_result,) in rows:
+        result = (raw_result or "").strip().lower()
+        if result == "passed":
+            passed += 1
+        elif result in {"review", "manual_review", "ko'rik", "korik"}:
+            review += 1
+        elif result in {"failed", "fail", "rejected"}:
+            failed += 1
+
+    total = passed + failed + review
+    return EsmoSummary24h(passed=passed, failed=failed, review=review, total=total)

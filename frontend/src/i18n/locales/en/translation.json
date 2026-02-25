@@ -24,7 +24,7 @@
     "dashboard": {
         "title": "Dashboard",
         "insideMine": "Inside Mine",
-        "esmoOkToday": "ESMO OK Today",
+        "esmoOkToday": "ESMO",
         "toolDebts": "Tool Debts",
         "blockedAttempts": "Blocked Attempts",
         "employee": "Employee",
@@ -92,6 +92,9 @@
             "employeeNo": "Employee #",
             "time": "Time",
             "device": "Device",
+            "pressure": "Pressure",
+            "pulse": "Pulse",
+            "temperature": "Temp",
             "status": "Status"
         }
     },
@@ -204,9 +207,13 @@
         "pending": "Pending",
         "duplicate": "Duplicate",
         "error": "Error",
-        "fail": "Fail"
+        "fail": "Fail",
+        "passed": "passed",
+        "failed": "failed",
+        "review": "review"
     },
     "common": {
-        "noData": "—"
+        "noData": "—",
+        "sync": "Synch"
     }
 }

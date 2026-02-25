@@ -24,7 +24,7 @@
     "dashboard": {
         "title": "Boshqaruv paneli",
         "insideMine": "Konda",
-        "esmoOkToday": "ESMO OK bugun",
+        "esmoOkToday": "ESMO",
         "toolDebts": "Asbob qarzlari",
         "blockedAttempts": "Bloklangan",
         "employee": "Xodim",
@@ -92,6 +92,9 @@
             "employeeNo": "Tabel №",
             "time": "Vaqt",
             "device": "Qurilma",
+            "pressure": "Bosim",
+            "pulse": "Puls",
+            "temperature": "Harorat",
             "status": "Holat"
         }
     },
@@ -193,9 +196,13 @@
         "pending": "Kutilmoqda",
         "duplicate": "Dublikat",
         "error": "Xato",
-        "fail": "Rad"
+        "fail": "Rad",
+        "passed": "o'tdi",
+        "failed": "rad",
+        "review": "ko'rik"
     },
     "common": {
-        "noData": "—"
+        "noData": "—",
+        "sync": "Sinx"
     }
 }

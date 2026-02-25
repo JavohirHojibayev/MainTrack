@@ -42,6 +42,8 @@ DEVICE_IP_MAP = {
     "192.168.0.220": {"name": "Chiqish-3", "direction": EventType.TURNSTILE_OUT},
 }
 
+DEDUP_SECONDS = max(settings.TURNSTILE_DEDUP_SECONDS, 1)
+
 
 # ─── Webhook Receiver (no auth — called by turnstile devices) ─────────
 
@@ -339,13 +341,15 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
         # Determine event type
         event_type = _determine_direction(ip_address, event_data)
 
-        # Debounce: Check for recent event (same employee, same type) within last 5 seconds
+        # Debounce: ignore repeated reads from the same device in a short window.
         recent_event = (
             db.query(Event)
             .filter(
+                Event.device_id == device.id,
                 Event.employee_id == employee.id,
                 Event.event_type == event_type,
-                Event.event_ts >= server_now - timedelta(seconds=5)
+                Event.event_ts >= server_now - timedelta(seconds=DEDUP_SECONDS),
+                Event.event_ts <= server_now + timedelta(seconds=1),
             )
             .first()
         )

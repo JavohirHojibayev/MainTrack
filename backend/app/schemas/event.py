@@ -91,3 +91,7 @@ class EventOut(BaseModel):
         except Exception:
             return data
 
+
+class EventPageOut(BaseModel):
+    items: list[EventOut]
+    total: int

@@ -2,6 +2,18 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel
 
+
+class MedicalExamEmployee(BaseModel):
+    id: int
+    employee_no: str
+    first_name: str
+    last_name: str
+    patronymic: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class MedicalExamBase(BaseModel):
     result: str
     terminal_name: Optional[str] = None
@@ -15,6 +27,7 @@ class MedicalExamBase(BaseModel):
 class MedicalExamRead(MedicalExamBase):
     id: int
     employee_id: int
+    employee: Optional[MedicalExamEmployee] = None
     
     class Config:
         from_attributes = True

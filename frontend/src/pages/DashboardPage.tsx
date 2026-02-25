@@ -5,12 +5,21 @@ import PeopleIcon from "@mui/icons-material/PeopleRounded";
 import MedicalIcon from "@mui/icons-material/MonitorHeartRounded";
 import BuildIcon from "@mui/icons-material/BuildRounded";
 import BlockIcon from "@mui/icons-material/BlockRounded";
-import Link from "@mui/material/Link";
 import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { MedicalExamList } from "@/components/MedicalExamList";
 import { useAppTheme } from "@/context/ThemeContext";
-import { fetchDailyMineSummary, fetchToolDebts, fetchBlockedAttempts, fetchEsmoSummary, type DailySummaryRow, type ToolDebtRow, type BlockedRow } from "@/api/dashboard";
+import { fetchDailyMineSummary, fetchToolDebts, fetchBlockedAttemptsCount, fetchEsmoSummary24h, type DailySummaryRow, type ToolDebtRow, type EsmoSummary24h } from "@/api/dashboard";
+
+const dashboardGradient = "linear-gradient(45deg, #3b82f6, #06b6d4)";
+const dashboardGradientTextSx = {
+    background: dashboardGradient,
+    WebkitBackgroundClip: "text",
+    backgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    color: "transparent",
+    display: "inline-block",
+};
 
 function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: number | string | React.ReactNode; color: string }) {
     const { tokens } = useAppTheme();
@@ -20,7 +29,33 @@ function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: 
         <GlassCard sx={{ display: "flex", alignItems: "center", gap: 2 }}>
             <Box sx={{ width: 52, height: 52, borderRadius: `${tokens.radius.sm}px`, display: "flex", alignItems: "center", justifyContent: "center", bgcolor: `${color}22`, color }}>{icon}</Box>
             <Box>
-                <Typography variant="h5" sx={{ fontWeight: 700, color: isComplex ? undefined : color, fontSize: typeof value === "string" && value.length > 5 ? "1.2rem" : "1.5rem" }}>{value}</Typography>
+                {isComplex ? (
+                    <Box
+                        sx={{
+                            fontWeight: 700,
+                            fontSize: "1.5rem",
+                            lineHeight: 1.2,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 1,
+                        }}
+                    >
+                        {value}
+                    </Box>
+                ) : (
+                    <Typography
+                        variant="h5"
+                        sx={{
+                            fontWeight: 700,
+                            color,
+                            fontSize: typeof value === "string" && value.length > 5 ? "1.2rem" : "1.5rem",
+                            WebkitTextFillColor: "unset",
+                            background: "none",
+                        }}
+                    >
+                        {value}
+                    </Typography>
+                )}
                 <Typography variant="body2">{label}</Typography>
             </Box>
         </GlassCard>
@@ -38,53 +73,88 @@ function dur(min: number) {
     return `${h}h ${m}m`;
 }
 
+function getLastActivityMs(row: DailySummaryRow): number {
+    const inTs = row.last_in ? new Date(row.last_in).getTime() : 0;
+    const outTs = row.last_out ? new Date(row.last_out).getTime() : 0;
+    return Math.max(inTs, outTs);
+}
+
+function getTodayTashkent(): string {
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Tashkent",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(new Date());
+    const year = parts.find((p) => p.type === "year")?.value ?? "1970";
+    const month = parts.find((p) => p.type === "month")?.value ?? "01";
+    const day = parts.find((p) => p.type === "day")?.value ?? "01";
+    return `${year}-${month}-${day}`;
+}
+
+function toTashkentDay(iso: string | null): string | null {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Tashkent",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(d);
+    const year = parts.find((p) => p.type === "year")?.value ?? "1970";
+    const month = parts.find((p) => p.type === "month")?.value ?? "01";
+    const day = parts.find((p) => p.type === "day")?.value ?? "01";
+    return `${year}-${month}-${day}`;
+}
+
 export default function DashboardPage() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
     const [summary, setSummary] = useState<DailySummaryRow[]>([]);
     const [debts, setDebts] = useState<ToolDebtRow[]>([]);
-    const [blocked, setBlocked] = useState<BlockedRow[]>([]);
-    const [esmoCount, setEsmoCount] = useState(0);
+    const [blockedCount, setBlockedCount] = useState(0);
+    const [esmoSummary, setEsmoSummary] = useState<EsmoSummary24h>({ passed: 0, failed: 0, review: 0, total: 0 });
     const [page, setPage] = useState(0);
     const [rowsPerPage, setRowsPerPage] = useState(10);
 
     // Side tables pagination
     const [debtsPage, setDebtsPage] = useState(0);
     const [debtsRowsPerPage, setDebtsRowsPerPage] = useState(5);
-    const [blockedPage, setBlockedPage] = useState(0);
-    const [blockedRowsPerPage, setBlockedRowsPerPage] = useState(5);
 
     useEffect(() => {
         const load = () => {
-            const d = new Date();
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            const today = `${year}-${month}-${day}`;
+            const today = getTodayTashkent();
 
             fetchDailyMineSummary(today)
                 .then(data => {
-                    // Sort by last_in DESC
+                    // Sort by last activity time (either entry or exit) DESC
                     const sorted = data.sort((a, b) => {
-                        const ta = a.last_in ? new Date(a.last_in).getTime() : 0;
-                        const tb = b.last_in ? new Date(b.last_in).getTime() : 0;
+                        const ta = getLastActivityMs(a);
+                        const tb = getLastActivityMs(b);
                         return tb - ta;
                     });
                     setSummary(sorted);
                 })
                 .catch(() => { });
-            fetchToolDebts().then(setDebts).catch(() => { });
-            fetchBlockedAttempts().then(setBlocked).catch(() => { });
-            fetchEsmoSummary(today).then(setEsmoCount).catch(() => { });
+            fetchToolDebts(today).then(setDebts).catch(() => { });
+            fetchBlockedAttemptsCount(today).then(setBlockedCount).catch(() => { setBlockedCount(0); });
+            fetchEsmoSummary24h(today).then(setEsmoSummary).catch(() => { });
         };
         load();
         const interval = setInterval(load, 30000);
         return () => clearInterval(interval);
     }, []);
 
-    const insideCount = summary.filter(r => r.is_inside).length;
-    const enteredCount = summary.length;
-    const exitedCount = summary.filter(r => !r.is_inside).length;
+    const todayTashkent = getTodayTashkent();
+    const enteredCount = summary.filter((r) => {
+        if (typeof r.entered_today === "boolean") return r.entered_today;
+        return toTashkentDay(r.last_in) === todayTashkent;
+    }).length;
+    const exitedCount = summary.filter((r) => {
+        if (typeof r.exited_today === "boolean") return r.exited_today;
+        return toTashkentDay(r.last_out) === todayTashkent;
+    }).length;
 
     return (
         <Box>
@@ -92,10 +162,7 @@ export default function DashboardPage() {
                 mb: 3,
                 fontSize: "2.5rem",
                 fontWeight: 700,
-                background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                display: "inline-block" // Ensure gradient applies correctly
+                ...dashboardGradientTextSx,
             }}>{t("dashboard.title")}</Typography>
             <Grid container spacing={2} sx={{ mb: 3 }}>
                 <Grid item xs={12} sm={6} md={3}>
@@ -104,17 +171,32 @@ export default function DashboardPage() {
                         label={t("dashboard.factoryInsideOutside")}
                         value={
                             <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                                <Box component="span" sx={{ color: "#f59e0b !important" }}>{insideCount}</Box>
+                                <Box component="span" sx={{ ...dashboardGradientTextSx }}>{enteredCount}</Box>
                                 <Box component="span" sx={{ color: tokens.text.muted + " !important", fontSize: "1.2rem" }}>/</Box>
-                                <Box component="span" sx={{ color: "#10b981 !important" }}>{exitedCount}</Box>
+                                <Box component="span" sx={{ ...dashboardGradientTextSx }}>{exitedCount}</Box>
                             </Box>
                         }
                         color={tokens.status.ok}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}><KpiCard icon={<MedicalIcon />} label={t("dashboard.esmoOkToday")} value={esmoCount} color={tokens.brand.secondary} /></Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <KpiCard
+                        icon={<MedicalIcon />}
+                        label={t("dashboard.esmoOkToday")}
+                        value={
+                            <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                <Box component="span" sx={{ ...dashboardGradientTextSx }}>{esmoSummary.passed}</Box>
+                                <Box component="span" sx={{ color: tokens.text.muted, fontSize: "1.2rem" }}>/</Box>
+                                <Box component="span" sx={{ ...dashboardGradientTextSx }}>{esmoSummary.failed}</Box>
+                                <Box component="span" sx={{ color: tokens.text.muted, fontSize: "1.2rem" }}>/</Box>
+                                <Box component="span" sx={{ ...dashboardGradientTextSx }}>{esmoSummary.review}</Box>
+                            </Box>
+                        }
+                        color={tokens.brand.secondary}
+                    />
+                </Grid>
                 <Grid item xs={12} sm={6} md={3}><KpiCard icon={<BuildIcon />} label={t("dashboard.toolDebts")} value={debts.length} color={tokens.status.warning} /></Grid>
-                <Grid item xs={12} sm={6} md={3}><KpiCard icon={<BlockIcon />} label={t("dashboard.blockedAttempts")} value={blocked.length} color={tokens.status.blocked} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><KpiCard icon={<BlockIcon />} label={t("dashboard.blockedAttempts")} value={blockedCount} color={tokens.status.blocked} /></Grid>
             </Grid>
             <Grid container spacing={2}>
                 <Grid item xs={12} md={8}>

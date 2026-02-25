@@ -4,9 +4,9 @@ import { useOutletContext } from "react-router-dom";
 import { Box, Typography, Button, CircularProgress } from "@mui/material";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 import GlassCard from "@/components/GlassCard";
-import StatusPill from "@/components/StatusPill";
 import { fetchEmployees, type Employee } from "@/api/employees";
 import { syncHikvisionUsers } from "@/api/devices";
+import { fetchEsmoEmployees, syncEsmoEmployees, type EsmoEmployee } from "@/api/medical";
 import { useAppTheme } from "@/context/ThemeContext";
 
 export default function EmployeesPage() {
@@ -14,16 +14,41 @@ export default function EmployeesPage() {
     const { tokens } = useAppTheme();
     const { searchQuery } = useOutletContext<{ searchQuery: string }>();
     const [employees, setEmployees] = useState<Employee[]>([]);
+    const [esmoEmployees, setEsmoEmployees] = useState<EsmoEmployee[]>([]);
     const [loading, setLoading] = useState(false);
+    const [esmoLoading, setEsmoLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [esmoSyncing, setEsmoSyncing] = useState(false);
+
+    const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
+        new Promise((resolve, reject) => {
+            const timer = window.setTimeout(() => reject(new Error("timeout")), ms);
+            promise
+                .then((value) => {
+                    window.clearTimeout(timer);
+                    resolve(value);
+                })
+                .catch((err) => {
+                    window.clearTimeout(timer);
+                    reject(err);
+                });
+        });
+
+    const loadEsmo = () => {
+        setEsmoLoading(true);
+        withTimeout(fetchEsmoEmployees(), 120000)
+            .then((esmoRows) => setEsmoEmployees(esmoRows))
+            .catch(() => { })
+            .finally(() => setEsmoLoading(false));
+    };
 
     const load = () => {
         setLoading(true);
         fetchEmployees()
-            .then(setEmployees)
-            .catch(() => { })
+            .then((empRows) => setEmployees(empRows))
+            .catch(() => setEmployees([]))
             .finally(() => setLoading(false));
+        loadEsmo();
     };
 
     useEffect(() => { load(); }, []);
@@ -49,8 +74,9 @@ export default function EmployeesPage() {
     const handleEsmoSync = async () => {
         setEsmoSyncing(true);
         try {
-            // ESMO sync will be implemented after integration
-            alert("ESMO integration pending");
+            const res = await syncEsmoEmployees();
+            setEsmoEmployees(res);
+            alert("ESMO Employees synced successfully");
         } catch (e) {
             console.error(e);
             alert("ESMO Sync error");
@@ -78,36 +104,15 @@ export default function EmployeesPage() {
                 const parts = [row.last_name, row.first_name, row.patronymic].filter(Boolean);
                 return parts.join(" ");
             }
-        },
-        {
-            field: "status",
-            headerName: t("employees.col.status"),
-            width: 120,
-            headerAlign: "center",
-            align: "center",
-            hideable: false,
-            renderCell: (params) => <StatusPill status={params.row.is_active ? "OK" : "OFFLINE"} />
-        },
+        }
     ];
 
     const esmoColumns: GridColDef[] = [
-        { field: "employee_no", headerName: t("employees.col.employeeNo"), width: 150, hideable: false },
-        {
-            field: "full_name",
-            headerName: t("employees.col.fullName"),
-            flex: 1,
-            minWidth: 200,
-            hideable: false,
-        },
-        {
-            field: "status",
-            headerName: t("employees.col.status"),
-            width: 120,
-            headerAlign: "center",
-            align: "center",
-            hideable: false,
-            renderCell: (params) => <StatusPill status={params.row.is_active ? "OK" : "OFFLINE"} />
-        },
+        { field: "pass_id", headerName: t("employees.col.employeeNo"), width: 120 },
+        { field: "full_name", headerName: t("employees.col.fullName"), flex: 1, minWidth: 200 },
+        { field: "organization", headerName: "Org", width: 150 },
+        { field: "department", headerName: "Dept", width: 150 },
+        { field: "position", headerName: "Pos", width: 200 },
     ];
 
     const syncButtonSx = {
@@ -149,7 +154,7 @@ export default function EmployeesPage() {
 
             <Box sx={{ display: "flex", gap: 2, flex: 1, minHeight: 0 }}>
                 {/* Turniket Table */}
-                <GlassCard sx={{ p: 0, display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
+                <GlassCard sx={{ p: 0, display: "flex", flexDirection: "column", flex: 0.85, minWidth: 0, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
                     <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 2, bgcolor: tokens.mode === "dark" ? tokens.bg.tableHeader : "#F0F4FA" }}>
                         <Typography variant="h4" sx={{ fontWeight: 700, fontSize: "30px", color: "#1976d2" }}>Turniket</Typography>
                         <Button
@@ -176,7 +181,7 @@ export default function EmployeesPage() {
                 </GlassCard>
 
                 {/* ESMO Table */}
-                <GlassCard sx={{ p: 0, display: "flex", flexDirection: "column", flex: 1, minWidth: 0, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
+                <GlassCard sx={{ p: 0, display: "flex", flexDirection: "column", flex: 1.15, minWidth: 0, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
                     <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 2, bgcolor: tokens.mode === "dark" ? tokens.bg.tableHeader : "#F0F4FA" }}>
                         <Typography variant="h4" sx={{ fontWeight: 700, fontSize: "30px", color: "#1976d2" }}>ESMO</Typography>
                         <Button
@@ -191,8 +196,9 @@ export default function EmployeesPage() {
                         </Button>
                     </Box>
                     <DataGrid
-                        rows={[]}
+                        rows={esmoEmployees}
                         columns={esmoColumns}
+                        loading={esmoLoading}
                         disableColumnSorting
                         disableColumnMenu
                         pageSizeOptions={[25, 50, 100]}

@@ -1,24 +1,55 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Box, Typography, TextField, Button, Grid, Drawer, IconButton } from "@mui/material";
-import { DataGrid, type GridColDef } from "@mui/x-data-grid";
+import { DataGrid, type GridColDef, type GridPaginationModel } from "@mui/x-data-grid";
 import CloseIcon from "@mui/icons-material/CloseRounded";
 import DownloadIcon from "@mui/icons-material/DownloadRounded";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfRounded";
 import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
-import { fetchEvents, type EventRow, type EventFilters } from "@/api/events";
+import { fetchEvents, fetchEventsPaged, type EventRow, type EventFilters } from "@/api/events";
 import { useAppTheme } from "@/context/ThemeContext";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+
+const pageTitleGradientSx = {
+    backgroundImage: "linear-gradient(45deg, #3b82f6 0%, #06b6d4 100%)",
+    WebkitBackgroundClip: "text !important",
+    backgroundClip: "text",
+    WebkitTextFillColor: "transparent !important",
+    color: "transparent !important",
+    display: "inline-block",
+};
 
 export default function TurnstileJournalPage() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
     const [rows, setRows] = useState<EventRow[]>([]);
     const [loading, setLoading] = useState(false);
-    const [filters, setFilters] = useState<EventFilters>({});
+    const [filters, setFilters] = useState<EventFilters>({ turnstile_only: true });
     const [selected, setSelected] = useState<EventRow | null>(null);
+    const [rowCount, setRowCount] = useState(0);
+    const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
+    const dedupeWindowMs = 20 * 1000;
+
+    const dedupeRows = (items: EventRow[]): EventRow[] => {
+        const lastSeen = new Map<string, number>();
+        const result: EventRow[] = [];
+        for (const row of items) {
+            const key = [
+                row.employee_id,
+                row.device_id,
+                row.event_type,
+                row.status,
+            ].join("|");
+            const ts = new Date(row.event_ts).getTime();
+            const prev = lastSeen.get(key);
+            if (prev != null && Math.abs(prev - ts) <= dedupeWindowMs) continue;
+            lastSeen.set(key, ts);
+            result.push(row);
+        }
+        return result;
+    };
 
     const columns: GridColDef[] = [
         {
@@ -46,8 +77,18 @@ export default function TurnstileJournalPage() {
             width: 130,
             hideable: false,
             renderCell: (p) => {
-                const isEntry = p.row.event_type === "TURNSTILE_IN" || p.row.event_type === "MINE_IN";
-                return <StatusPill status={p.value} colorStatus={isEntry ? "WARNING" : undefined} />;
+                const deviceName = String(p.row.device_name || "").toLowerCase();
+                const isEntryByDevice = deviceName.includes("kirish") || deviceName.includes("entry");
+                const isExitByDevice = deviceName.includes("chiqish") || deviceName.includes("exit");
+                const isEntryByType = p.row.event_type === "TURNSTILE_IN" || p.row.event_type === "MINE_IN";
+                const isExitByType = p.row.event_type === "TURNSTILE_OUT" || p.row.event_type === "MINE_OUT";
+                const isEntry = isEntryByDevice || (!isExitByDevice && isEntryByType && !isExitByType);
+                return (
+                    <StatusPill
+                        status={isEntry ? t("dashboard.statusInside") : t("dashboard.statusOutside")}
+                        colorStatus={isEntry ? "INSIDE" : "OUTSIDE"}
+                    />
+                );
             }
         },
     ];
@@ -55,10 +96,11 @@ export default function TurnstileJournalPage() {
     const getFullName = (row: EventRow) => [row.last_name, row.first_name, row.patronymic].filter(Boolean).join(" ");
     const formatTime = (ts: string) => { try { return new Date(ts).toLocaleString("en-GB"); } catch { return ts; } };
 
-    const exportCSV = () => {
-        if (rows.length === 0) return;
+    const exportCSV = async () => {
+        const fullRows = dedupeRows(await fetchEvents({ ...filters, turnstile_only: true, limit: 10000 }));
+        if (fullRows.length === 0) return;
         const header = `${t("events.col.name")};${t("events.col.employeeNo")};${t("events.col.time")};${t("events.col.deviceId")};${t("events.col.status")}\n`;
-        const csvRows = rows.map(r =>
+        const csvRows = fullRows.map(r =>
             `"${getFullName(r)}";"${r.employee_no || ""}";"${formatTime(r.event_ts)}";"${r.device_name || r.device_id}";"${r.status}"`
         ).join("\n");
         const blob = new Blob(["\uFEFF" + header + csvRows], { type: "text/csv;charset=utf-8;" });
@@ -70,7 +112,8 @@ export default function TurnstileJournalPage() {
     };
 
     const exportPDF = async () => {
-        if (rows.length === 0) return;
+        const fullRows = dedupeRows(await fetchEvents({ ...filters, turnstile_only: true, limit: 10000 }));
+        if (fullRows.length === 0) return;
         const doc = new jsPDF({ orientation: "landscape" });
 
         // Load Roboto font for Cyrillic support
@@ -92,7 +135,7 @@ export default function TurnstileJournalPage() {
         doc.setTextColor(100);
         doc.text(`${t("events.generated")}: ${new Date().toLocaleString()}`, 14, 25);
 
-        const tableData = rows.map(r => [
+        const tableData = fullRows.map(r => [
             getFullName(r),
             r.employee_no || "",
             formatTime(r.event_ts),
@@ -113,8 +156,28 @@ export default function TurnstileJournalPage() {
         doc.save(`turnstile_journal_${new Date().toISOString().split('T')[0]}.pdf`);
     };
 
-    const load = () => { setLoading(true); fetchEvents(filters).then(setRows).catch(() => { }).finally(() => setLoading(false)); };
+    const load = (page = paginationModel.page, pageSize = paginationModel.pageSize) => {
+        setLoading(true);
+        fetchEventsPaged({
+            ...filters,
+            turnstile_only: true,
+            offset: page * pageSize,
+            limit: pageSize,
+        })
+            .then((data) => {
+                setRows(dedupeRows(data.items));
+                setRowCount(data.total);
+            })
+            .catch(() => { })
+            .finally(() => setLoading(false));
+    };
     useEffect(() => { load(); }, []);
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            load();
+        }, 10000);
+        return () => window.clearInterval(timer);
+    }, [filters, paginationModel.page, paginationModel.pageSize]);
 
     return (
         <Box sx={{ height: "calc(100vh - 120px)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -122,17 +185,25 @@ export default function TurnstileJournalPage() {
                 mb: 3,
                 fontSize: "2.5rem",
                 fontWeight: 700,
-                background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                display: "inline-block",
                 flexShrink: 0
-            }}>{t("events.title")}</Typography>
+            }}>
+                <Box component="span" sx={pageTitleGradientSx}>{t("events.title")}</Box>
+            </Typography>
             <Box sx={{ mb: 4, display: "flex", gap: 2, alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
                 <TextField label={t("events.dateFrom")} type="date" InputLabelProps={{ shrink: true }} sx={{ minWidth: 160 }} onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value ? new Date(e.target.value).toISOString() : undefined }))} />
                 <TextField label={t("events.dateTo")} type="date" InputLabelProps={{ shrink: true }} sx={{ minWidth: 160 }} onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value ? new Date(e.target.value + "T23:59:59").toISOString() : undefined }))} />
                 <TextField label={t("events.search")} placeholder={t("events.searchHint")} sx={{ minWidth: 200 }} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value || undefined }))} />
-                <Button variant="contained" onClick={load} sx={{ height: 40, minWidth: 100, borderRadius: "50px", textTransform: "none", fontWeight: "bold", whiteSpace: "nowrap" }}>{t("events.apply")}</Button>
+                <Button
+                    variant="contained"
+                    onClick={() => {
+                        const next = { ...paginationModel, page: 0 };
+                        setPaginationModel(next);
+                        load(0, next.pageSize);
+                    }}
+                    sx={{ height: 40, minWidth: 100, borderRadius: "50px", textTransform: "none", fontWeight: "bold", whiteSpace: "nowrap" }}
+                >
+                    {t("events.apply")}
+                </Button>
                 <Button
                     variant="contained"
                     startIcon={<DownloadIcon />}
@@ -155,8 +226,14 @@ export default function TurnstileJournalPage() {
             <GlassCard sx={{ p: 0, flex: 1, width: "fit-content", minWidth: 1020, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
                 <DataGrid
                     rows={rows} columns={columns} loading={loading}
+                    rowCount={rowCount}
+                    paginationMode="server"
                     pageSizeOptions={[25, 50, 100]}
-                    initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+                    paginationModel={paginationModel}
+                    onPaginationModelChange={(model) => {
+                        setPaginationModel(model);
+                        load(model.page, model.pageSize);
+                    }}
                     onRowClick={(p) => setSelected(p.row as EventRow)}
                     disableColumnSorting
                     disableColumnMenu

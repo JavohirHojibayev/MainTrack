@@ -26,15 +26,14 @@ class HikvisionClient:
         self.auth = HTTPDigestAuth(user, password)
         self.timeout = timeout
         self.name = host
+        self.session = requests.Session()
+        # Local device IPs must not use global system proxy.
+        self.session.trust_env = False
 
     def _get(self, path: str) -> requests.Response | None:
         """Send a READ-ONLY GET request. Never sends POST/PUT/DELETE."""
         try:
-            resp = requests.get(
-                f"{self.base_url}{path}",
-                auth=self.auth,
-                timeout=self.timeout,
-            )
+            resp = self.session.get(f"{self.base_url}{path}", auth=self.auth, timeout=self.timeout)
             resp.raise_for_status()
             return resp
         except requests.exceptions.RequestException as exc:
@@ -45,7 +44,7 @@ class HikvisionClient:
         """Send a POST request for SEARCH operations only (read-only search).
         Hikvision ISAPI uses POST for search queries — this does NOT modify any data."""
         try:
-            resp = requests.post(
+            resp = self.session.post(
                 f"{self.base_url}{path}",
                 json=body,
                 auth=self.auth,
