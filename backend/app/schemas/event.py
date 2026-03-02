@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.models.event import EventStatus, EventType
 
+TURNSTILE_NAME_BY_HOST = {
+    "192.168.1.181": "shaxta kirish",
+    "192.168.1.180": "shaxta chiqish",
+}
+
 
 class EventIn(BaseModel):
     device_code: str
@@ -83,8 +88,10 @@ class EventOut(BaseModel):
                 
                 # Flatten Device
                 if hasattr(data, "device") and data.device:
-                    obj_dict["device_name"] = data.device.name
-                    obj_dict["device_host"] = data.device.host
+                    device_host = data.device.host
+                    forced_name = TURNSTILE_NAME_BY_HOST.get(str(device_host or "").strip())
+                    obj_dict["device_name"] = forced_name or data.device.name
+                    obj_dict["device_host"] = device_host
                     
                 return obj_dict
             return data

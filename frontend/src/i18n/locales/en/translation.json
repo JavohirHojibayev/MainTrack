@@ -9,6 +9,7 @@
         "events": "Turnstile",
         "esmo": "ESMO",
         "employees": "Employees",
+        "tools": "Lamp & self-rescuer",
         "devices": "Devices",
         "reports": "Reports",
         "admin": "Admin"
@@ -17,7 +18,7 @@
         "username": "Username",
         "password": "Password",
         "signIn": "Sign In",
-        "signingIn": "Signing in…",
+        "signingIn": "Signing in...",
         "invalidCredentials": "Invalid username or password",
         "loginFailed": "Login failed"
     },
@@ -38,7 +39,7 @@
         "noDebts": "No debts",
         "clear": "Clear",
         "dailyActivity": "Daily Activity",
-        "factoryActivity": "Factory — Daily Activity",
+        "factoryActivity": "Factory - Daily Activity",
         "factoryInsideOutside": "Factory Inside / Outside",
         "status": "Status",
         "entered": "Entered",
@@ -137,13 +138,24 @@
         "apiKey": "API Key",
         "create": "Create",
         "noDevices": "No devices",
+        "dataOk": "DATA OK",
+        "dataStale": "STALE",
+        "dataNoData": "NO DATA",
+        "turnOn": "Turn On",
+        "turnOff": "Turn Off",
+        "password": "Password",
+        "powerDialogTitle": "Device Control",
+        "powerUpdateError": "Failed to update device state",
+        "invalidPassword": "Incorrect control password",
         "col": {
             "name": "Name",
             "code": "Code",
             "host": "IP",
             "type": "Type",
             "location": "Location",
-            "status": "Status"
+            "status": "Status",
+            "power": "Power",
+            "dataStatus": "Data Status"
         }
     },
     "adminUsers": {
@@ -191,8 +203,28 @@
             "blocked": "Blocked Attempts"
         }
     },
+    "tools": {
+        "title": "Lamp & self-rescuer",
+        "dateFrom": "Date From",
+        "dateTo": "Date To",
+        "search": "Search",
+        "searchHint": "Name or ID",
+        "apply": "Apply",
+        "exportCsv": "Export CSV",
+        "exportPdf": "Export PDF",
+        "col": {
+            "employeeNo": "Employee #",
+            "name": "Name",
+            "turnstileTime": "Turnstile Time",
+            "esmoTime": "ESMO Time",
+            "toolName": "Tool",
+            "quantity": "Qty",
+            "issuedAt": "Issued At",
+            "issuer": "Issuer"
+        }
+    },
     "topbar": {
-        "search": "Search employees, devices…",
+        "search": "Search employees, devices...",
         "theme": "Toggle theme",
         "language": "Language"
     },
@@ -213,7 +245,11 @@
         "review": "review"
     },
     "common": {
-        "noData": "—",
-        "sync": "Synch"
+        "noData": "-",
+        "sync": "Synch",
+        "cancel": "Cancel",
+        "confirm": "Confirm"
     }
 }
+
+

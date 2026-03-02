@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_db
 from app.core.rbac import require_roles
 from app.core.esmo_poller import get_allowed_esmo_terminal_names
+from app.models.device import Device
 from app.models.employee import Employee
 from app.models.user import User
 from app.models.event import Event, EventStatus, EventType
@@ -16,6 +17,31 @@ from app.models.medical_exam import MedicalExam
 from app.schemas.report import InsideMineItem, MineWorkSummaryItem, ToolDebtItem, ReportSummary, EsmoSummary24h
 
 router = APIRouter()
+
+TURNSTILE_JOURNAL_HOSTS = {
+    "192.168.0.221",
+    "192.168.0.224",
+    "192.168.0.222",
+    "192.168.0.220",
+    "192.168.0.219",
+    "192.168.0.223",
+    "192.168.1.180",
+    "192.168.1.181",
+}
+
+TURNSTILE_IN_HOSTS = {
+    "192.168.0.221",
+    "192.168.0.223",
+    "192.168.0.219",
+    "192.168.1.181",
+}
+
+TURNSTILE_OUT_HOSTS = {
+    "192.168.0.224",
+    "192.168.0.222",
+    "192.168.0.220",
+    "192.168.1.180",
+}
 
 
 def _current_local_day() -> date:
@@ -30,36 +56,116 @@ def _local_day_bounds(day: date) -> tuple[datetime, datetime]:
     return start_local, end_local
 
 
+def _esmo_result_rank(result_raw: str | None) -> int:
+    value = (result_raw or "").strip().lower()
+    if value == "passed":
+        return 3
+    if value in {"review", "manual_review", "ko'rik", "korik"}:
+        return 2
+    if value in {"failed", "fail", "rejected"}:
+        return 1
+    return 0
+
+
+def _to_local_naive(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt
+    tz_local = timezone(timedelta(hours=5))
+    return dt.astimezone(tz_local).replace(tzinfo=None)
+
+
+def _latest_esmo_result_counts(
+    db: Session,
+    start_local_naive: datetime | None = None,
+    end_local_naive: datetime | None = None,
+) -> tuple[int, int, int]:
+    query = (
+        db.query(MedicalExam.employee_id, MedicalExam.result, MedicalExam.timestamp, MedicalExam.id, MedicalExam.esmo_id)
+        .filter(MedicalExam.terminal_name.in_(get_allowed_esmo_terminal_names()))
+    )
+    if start_local_naive is not None:
+        query = query.filter(MedicalExam.timestamp >= start_local_naive)
+    if end_local_naive is not None:
+        query = query.filter(MedicalExam.timestamp <= end_local_naive)
+
+    rows = query.order_by(MedicalExam.timestamp.desc(), MedicalExam.esmo_id.desc().nullslast(), MedicalExam.id.desc()).all()
+
+    latest_result_by_employee: dict[int, tuple[str, datetime, int, int, int]] = {}
+    for employee_id, raw_result, ts, row_id, esmo_id in rows:
+        esmo_key = int(esmo_id or 0)
+        normalized = (raw_result or "").strip().lower()
+        current = latest_result_by_employee.get(employee_id)
+        if current is None:
+            latest_result_by_employee[employee_id] = (normalized, ts, row_id, esmo_key, _esmo_result_rank(normalized))
+            continue
+
+        _current_result, current_ts, current_id, current_esmo_key, current_rank = current
+        candidate_rank = _esmo_result_rank(normalized)
+        should_replace = False
+        if ts > current_ts:
+            should_replace = True
+        elif ts == current_ts:
+            if esmo_key > current_esmo_key:
+                should_replace = True
+            elif esmo_key == current_esmo_key and candidate_rank > current_rank:
+                should_replace = True
+            elif esmo_key == current_esmo_key and candidate_rank == current_rank and row_id > current_id:
+                should_replace = True
+
+        if should_replace:
+            latest_result_by_employee[employee_id] = (normalized, ts, row_id, esmo_key, candidate_rank)
+
+    passed = 0
+    failed = 0
+    review = 0
+    for result, _ts, _id, _esmo_key, _rank in latest_result_by_employee.values():
+        if result == "passed":
+            passed += 1
+        elif result in {"review", "manual_review", "ko'rik", "korik"}:
+            review += 1
+        elif result in {"failed", "fail", "rejected"}:
+            failed += 1
+
+    return passed, failed, review
+
+
 @router.get("/summary", response_model=ReportSummary)
 def get_report_summary(
-    date_from: datetime = Query(...),
-    date_to: datetime = Query(...),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
 ) -> ReportSummary:
     # Query to count all event types in one go
-    counts = (
-        db.query(Event.event_type, func.count(Event.id))
-        .filter(Event.event_ts >= date_from, Event.event_ts <= date_to)
-        .group_by(Event.event_type)
-        .all()
-    )
+    counts_query = db.query(Event.event_type, func.count(Event.id))
+    if date_from is not None:
+        counts_query = counts_query.filter(Event.event_ts >= date_from)
+    if date_to is not None:
+        counts_query = counts_query.filter(Event.event_ts <= date_to)
+    counts = counts_query.group_by(Event.event_type).all()
     
     mapping = {row[0]: row[1] for row in counts}
     
     # Blocked attempts (status REJECTED)
-    blocked_count = (
-        db.query(func.count(Event.id))
-        .filter(Event.status == EventStatus.REJECTED)
-        .filter(Event.event_ts >= date_from, Event.event_ts <= date_to)
-        .scalar()
-    ) or 0
+    blocked_query = db.query(func.count(Event.id)).filter(Event.status == EventStatus.REJECTED)
+    if date_from is not None:
+        blocked_query = blocked_query.filter(Event.event_ts >= date_from)
+    if date_to is not None:
+        blocked_query = blocked_query.filter(Event.event_ts <= date_to)
+    blocked_count = blocked_query.scalar() or 0
+
+    esmo_ok_latest, esmo_failed_latest, esmo_review_latest = _latest_esmo_result_counts(
+        db=db,
+        start_local_naive=_to_local_naive(date_from) if date_from is not None else None,
+        end_local_naive=_to_local_naive(date_to) if date_to is not None else None,
+    )
 
     return ReportSummary(
         turnstile_in=mapping.get(EventType.TURNSTILE_IN, 0),
         turnstile_out=mapping.get(EventType.TURNSTILE_OUT, 0),
-        esmo_ok=mapping.get(EventType.ESMO_OK, 0),
-        esmo_fail=mapping.get(EventType.ESMO_FAIL, 0),
+        # Reports table has only OK/FAIL columns, so review is grouped into FAIL.
+        esmo_ok=esmo_ok_latest,
+        esmo_fail=esmo_failed_latest + esmo_review_latest,
         tool_takes=mapping.get(EventType.TOOL_TAKE, 0),
         tool_returns=mapping.get(EventType.TOOL_RETURN, 0),
         mine_in=mapping.get(EventType.MINE_IN, 0),
@@ -165,68 +271,55 @@ def daily_mine_summary(
     TZ = timezone(timedelta(hours=5))
     start = datetime(day.year, day.month, day.day, tzinfo=TZ)
     end = start + timedelta(days=1)
-    
-    # Look back 16 hours (for 10-hour shifts) to catch overnight shifts
-    query_start = start - timedelta(hours=16)
-    
+
     events = (
-        db.query(Event)
+        db.query(Event, Device.host)
+        .join(Device, Device.id == Event.device_id)
         .filter(
             Event.status == EventStatus.ACCEPTED,
             Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]),
-            Event.event_ts >= query_start,
-            Event.event_ts <= end + timedelta(days=1),
+            Event.event_ts >= start,
+            Event.event_ts < end,
+            Device.host.in_(TURNSTILE_JOURNAL_HOSTS),
         )
-        .order_by(Event.employee_id, Event.event_ts)
+        .order_by(Event.employee_id, Event.event_ts, Event.id)
         .all()
     )
 
     summary: dict[int, dict] = {}
-    current_in: dict[int, datetime] = {}
-
-    for ev in events:
+    for ev, device_host in events:
         emp_id = ev.employee_id
         if emp_id not in summary:
             summary[emp_id] = {
-                "total_minutes": 0,
-                "last_in": None,
-                "last_out": None,
+                "last_in_today": None,
+                "last_out_today": None,
                 "is_inside": False,
-                # Track if they have activity TODAY so we filter correctly
-                "has_activity_today": False,
-                # Daily counters for dashboard KPI (entered/exited today)
                 "has_in_today": False,
                 "has_out_today": False,
             }
-        
+
         entry = summary[emp_id]
-        
-        # Check if event is within the requested day (start <= ts < end)
-        is_today = start <= ev.event_ts < end
-        if is_today:
-            entry["has_activity_today"] = True
 
-        if ev.event_type == EventType.TURNSTILE_IN:
-            if is_today:
-                entry["has_in_today"] = True
-            current_in[emp_id] = ev.event_ts
-            entry["last_in"] = ev.event_ts
+        normalized_is_in: bool
+        if device_host in TURNSTILE_IN_HOSTS:
+            normalized_is_in = True
+        elif device_host in TURNSTILE_OUT_HOSTS:
+            normalized_is_in = False
+        else:
+            normalized_is_in = ev.event_type == EventType.TURNSTILE_IN
+
+        if normalized_is_in:
+            entry["has_in_today"] = True
+            entry["last_in_today"] = ev.event_ts
             entry["is_inside"] = True
-        elif ev.event_type in [EventType.TURNSTILE_OUT]:
-            if is_today:
-                entry["has_out_today"] = True
-            # Only record as exit if they were arguably inside or we are just tracking the last exit event
-            # If they have multiple outs, we just update last_out
-            entry["last_out"] = ev.event_ts
+        else:
+            entry["has_out_today"] = True
+            entry["last_out_today"] = ev.event_ts
             entry["is_inside"] = False
-            if emp_id in current_in:
-                # We don't need to accumulate total minutes for previous sessions anymore
-                # because the UI shows "Last In" / "Last Out", so Duration should match that interval.
-                current_in.pop(emp_id)
 
-    # Calculate session duration based on Last In / Last Out
     now = datetime.now(TZ)
-    
+    effective_now = now if now < end else end
+
     if not summary:
         return []
 
@@ -235,40 +328,27 @@ def daily_mine_summary(
 
     result: list[MineWorkSummaryItem] = []
     for emp_id, data in summary.items():
-        is_active_today = data["has_activity_today"]
-
-        # Dashboard daily table must show only events from the requested calendar day.
-        if not is_active_today:
-            continue
-
         emp = by_id.get(emp_id)
         if not emp:
             continue
-        
-        # If currently inside, previous exit time is irrelevant/confusing for "Daily Activity" row
-        final_last_out = data["last_out"] if not data["is_inside"] else None
 
-        # Calculate duration based on the DISPLAYED session (Last In -> Last Out/Now)
-        # This fixes the confusion where "Total Daily Duration" > "Interval shown"
+        last_in = data["last_in_today"]
+        last_out = data["last_out_today"]
+
+        # If currently inside, hide exit time in table.
+        final_last_out = last_out if not data["is_inside"] else None
+
         session_minutes = 0
-        if data["last_in"]:
-            # Ensure timezone awareness
-            l_in = data["last_in"]
-            if l_in.tzinfo is None: l_in = l_in.replace(tzinfo=TZ)
-            
+        if last_in:
+            l_in = last_in if last_in.tzinfo is not None else last_in.replace(tzinfo=TZ)
+
             if data["is_inside"]:
-                # Currently inside: Duration = Now - Last In
-                if now > l_in:
-                    duration = now - l_in
-                    session_minutes = int(duration.total_seconds() // 60)
-            elif data["last_out"]:
-                # Currently outside: Duration = Last Out - Last In
-                l_out = data["last_out"]
-                if l_out.tzinfo is None: l_out = l_out.replace(tzinfo=TZ)
-                
+                if effective_now > l_in:
+                    session_minutes = int((effective_now - l_in).total_seconds() // 60)
+            elif last_out:
+                l_out = last_out if last_out.tzinfo is not None else last_out.replace(tzinfo=TZ)
                 if l_out > l_in:
-                    duration = l_out - l_in
-                    session_minutes = int(duration.total_seconds() // 60)
+                    session_minutes = int((l_out - l_in).total_seconds() // 60)
 
         full_name = f"{emp.last_name} {emp.first_name} {emp.patronymic or ''}".strip()
         result.append(
@@ -277,7 +357,7 @@ def daily_mine_summary(
                 employee_no=emp.employee_no,
                 full_name=full_name,
                 total_minutes=max(session_minutes, 0),
-                last_in=data["last_in"],
+                last_in=last_in,
                 last_out=final_last_out,
                 is_inside=data["is_inside"],
                 entered_today=bool(data.get("has_in_today")),
@@ -376,31 +456,15 @@ def esmo_summary_24h(
     start_local = datetime(day.year, day.month, day.day, tzinfo=tz_local)
     end_local = start_local + timedelta(days=1)
 
-    # Exams are stored in UTC in DB; compare by UTC window for the local day.
-    start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
-    end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+    # MedicalExam timestamps are stored as local naive datetime.
+    start_local_naive = start_local.replace(tzinfo=None)
+    end_local_naive = end_local.replace(tzinfo=None)
 
-    rows = (
-        db.query(MedicalExam.result)
-        .filter(
-            MedicalExam.timestamp >= start_utc,
-            MedicalExam.timestamp < end_utc,
-            MedicalExam.terminal_name.in_(get_allowed_esmo_terminal_names()),
-        )
-        .all()
+    passed, failed, review = _latest_esmo_result_counts(
+        db=db,
+        start_local_naive=start_local_naive,
+        end_local_naive=end_local_naive - timedelta(microseconds=1),
     )
-
-    passed = 0
-    failed = 0
-    review = 0
-    for (raw_result,) in rows:
-        result = (raw_result or "").strip().lower()
-        if result == "passed":
-            passed += 1
-        elif result in {"review", "manual_review", "ko'rik", "korik"}:
-            review += 1
-        elif result in {"failed", "fail", "rejected"}:
-            failed += 1
 
     total = passed + failed + review
     return EsmoSummary24h(passed=passed, failed=failed, review=review, total=total)

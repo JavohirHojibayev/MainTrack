@@ -3,6 +3,7 @@ import { apiClient } from "./client";
 export interface MedicalExam {
     id: number;
     employee_id: number;
+    employee_full_name?: string;
     terminal_name: string;
     result: string;
     pressure_systolic?: number;
@@ -35,6 +36,7 @@ export interface MedicalExamFilters {
     start_date?: string;
     end_date?: string;
     search?: string;
+    latest_per_employee?: boolean;
 }
 
 export async function fetchMedicalExams(params?: MedicalExamFilters): Promise<MedicalExam[]> {

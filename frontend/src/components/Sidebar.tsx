@@ -8,6 +8,7 @@ import DevicesIcon from "@mui/icons-material/DevicesOtherRounded";
 import AssessmentIcon from "@mui/icons-material/AssessmentRounded";
 import MedicalServicesIcon from "@mui/icons-material/MedicalServicesRounded";
 import AdminIcon from "@mui/icons-material/AdminPanelSettingsRounded";
+import EngineeringIcon from "@mui/icons-material/EngineeringRounded";
 import { useAppTheme } from "@/context/ThemeContext";
 
 export default function Sidebar() {
@@ -21,10 +22,11 @@ export default function Sidebar() {
         { path: "/dashboard", label: t("nav.dashboard"), icon: <DashboardIcon /> },
         { path: "/turnstile-journal", label: t("nav.events"), icon: <TurnstileIcon /> },
         { path: "/esmo-journal", label: t("nav.esmo"), icon: <MedicalServicesIcon /> },
+        { path: "/lamp-self-rescuer", label: t("nav.tools"), icon: <EngineeringIcon /> },
         { path: "/employees", label: t("nav.employees"), icon: <PeopleIcon /> },
         { path: "/devices", label: t("nav.devices"), icon: <DevicesIcon /> },
         { path: "/reports", label: t("nav.reports"), icon: <AssessmentIcon /> },
-        { path: "/admin/users", label: t("nav.admin"), icon: <AdminIcon /> },
+        { path: "/user-management", label: t("adminUsers.title"), icon: <AdminIcon /> },
     ];
 
     return (
@@ -55,7 +57,7 @@ export default function Sidebar() {
                                     bgcolor: active ? "rgba(59,130,246,0.12)" : "transparent",
                                     "&:hover": {
                                         bgcolor: active ? "rgba(59,130,246,0.18)" : tokens.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
-                                        color: tokens.text.primary,
+                                        color: tokens.brand.primary,
                                     },
                                 }}
                             >

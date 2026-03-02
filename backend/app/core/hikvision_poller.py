@@ -37,23 +37,64 @@ DEVICE_IP_MAP = {
     "192.168.0.223": EventType.TURNSTILE_IN,
     "192.168.0.221": EventType.TURNSTILE_IN,
     "192.168.0.219": EventType.TURNSTILE_IN,
+    "192.168.1.181": EventType.TURNSTILE_IN,
+    "192.168.1.180": EventType.TURNSTILE_OUT,
     "192.168.0.224": EventType.TURNSTILE_OUT,
     "192.168.0.222": EventType.TURNSTILE_OUT,
     "192.168.0.220": EventType.TURNSTILE_OUT,
 }
 
 DEDUP_SECONDS = max(settings.TURNSTILE_DEDUP_SECONDS, 1)
+LOCAL_TZ = timezone(timedelta(hours=5))
+INITIAL_LOOKBACK_HOURS = max(settings.HIKVISION_INITIAL_LOOKBACK_HOURS, 1)
+RECOVERY_OVERLAP_SECONDS = max(settings.HIKVISION_RECOVERY_OVERLAP_SECONDS, 0)
 
 
 def _parse_devices() -> list[dict]:
     """Parse HIKVISION_DEVICES from settings (JSON string)."""
     try:
         devices = json.loads(settings.HIKVISION_DEVICES)
-        if isinstance(devices, list):
-            return devices
+        if isinstance(devices, list) and devices:
+            filtered = [d for d in devices if isinstance(d, dict) and d.get("host")]
+            if filtered:
+                return filtered
     except (json.JSONDecodeError, TypeError):
         pass
-    return []
+    # Fallback to hardcoded map so polling can still recover data after downtime.
+    return [{"host": ip, "name": ip, "port": 80} for ip in DEVICE_IP_MAP]
+
+
+def _ensure_aware_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _compute_poll_window(db: Session, device_id: int) -> tuple[str, str]:
+    now_local = datetime.now(LOCAL_TZ)
+
+    latest_event = (
+        db.query(Event.event_ts)
+        .filter(
+            Event.device_id == device_id,
+            Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]),
+        )
+        .order_by(Event.event_ts.desc())
+        .first()
+    )
+
+    if latest_event and latest_event[0]:
+        last_event_utc = _ensure_aware_utc(latest_event[0])
+        start_local = last_event_utc.astimezone(LOCAL_TZ) - timedelta(seconds=RECOVERY_OVERLAP_SECONDS)
+    else:
+        start_local = now_local - timedelta(hours=INITIAL_LOOKBACK_HOURS)
+
+    if start_local >= now_local:
+        start_local = now_local - timedelta(minutes=1)
+
+    start_time = start_local.strftime("%Y-%m-%dT%H:%M:%S+05:00")
+    end_time = now_local.strftime("%Y-%m-%dT%H:%M:%S+05:00")
+    return start_time, end_time
 
 
 def _get_or_create_device(db: Session, device_info: dict) -> Device | None:
@@ -174,21 +215,22 @@ def poll_single_device(device_info: dict) -> int:
         password=settings.HIKVISION_PASS,
     )
 
-    # Time window: last 5 minutes (overlap to catch any missed events)
-    now = datetime.now(timezone(timedelta(hours=5)))
-    start_time = (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S+05:00")
-    end_time = now.strftime("%Y-%m-%dT%H:%M:%S+05:00")
-
-    events = client.fetch_access_events(start_time, end_time)
-    if not events:
-        return 0
-
     db: Session = SessionLocal()
     saved_count = 0
     try:
         device = _get_or_create_device(db, device_info)
         if not device:
             logger.error("Could not find/create device for %s", name)
+            return 0
+        if not device.is_active:
+            logger.info("[%s] Device is disabled, skip polling", name)
+            db.commit()
+            return 0
+
+        start_time, end_time = _compute_poll_window(db, device.id)
+        events = client.fetch_access_events(start_time, end_time)
+        if not events:
+            db.commit()
             return 0
 
         for evt_data in events:
@@ -256,7 +298,13 @@ def poll_single_device(device_info: dict) -> int:
             except IntegrityError:
                 db.rollback()  # Duplicate — skip silently
 
-        logger.info("[%s] Saved %d new events", name, saved_count)
+        logger.info(
+            "[%s] Saved %d new events (window: %s -> %s)",
+            name,
+            saved_count,
+            start_time,
+            end_time,
+        )
     except Exception as exc:
         logger.error("[%s] Polling error: %s", name, exc)
         db.rollback()

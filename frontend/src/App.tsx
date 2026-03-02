@@ -11,6 +11,7 @@ import EmployeesPage from "@/pages/EmployeesPage";
 import DevicesPage from "@/pages/DevicesPage";
 import ReportsPage from "@/pages/ReportsPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
+import ToolsPage from "@/pages/ToolsPage";
 
 export default function App() {
     return (
@@ -26,7 +27,10 @@ export default function App() {
                             <Route path="/employees" element={<EmployeesPage />} />
                             <Route path="/devices" element={<DevicesPage />} />
                             <Route path="/reports" element={<ReportsPage />} />
-                            <Route path="/admin/users" element={<AdminUsersPage />} />
+                            <Route path="/lamp-self-rescuer" element={<ToolsPage />} />
+                            <Route path="/tools" element={<Navigate to="/lamp-self-rescuer" replace />} />
+                            <Route path="/user-management" element={<AdminUsersPage />} />
+                            <Route path="/admin/users" element={<Navigate to="/user-management" replace />} />
                         </Route>
                         <Route path="*" element={<Navigate to="/dashboard" replace />} />
                     </Routes>

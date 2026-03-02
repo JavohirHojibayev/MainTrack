@@ -2,28 +2,45 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.core import deps
 from app.models.employee import Employee
 from app.models.employee_external_id import EmployeeExternalID
 from app.models.medical_exam import MedicalExam
+from app.models.event import Event
 from app.core.esmo_poller import get_allowed_esmo_terminal_names, poll_esmo_once
 from app.schemas.medical_exam import MedicalExamRead
 
 router = APIRouter()
 ESMO_SYSTEM = "ESMO"
 
+def _is_newer_exam(candidate: MedicalExam, current: MedicalExam) -> bool:
+    cand_ts = candidate.timestamp
+    curr_ts = current.timestamp
+    if cand_ts > curr_ts:
+        return True
+    if cand_ts < curr_ts:
+        return False
 
-def _local_day_bounds_utc(day_value: date) -> tuple[datetime, datetime]:
-    tz_local = timezone(timedelta(hours=5))
-    start_local = datetime(day_value.year, day_value.month, day_value.day, tzinfo=tz_local)
+    # Same timestamp: prefer larger ESMO source id if present.
+    cand_esmo_id = candidate.esmo_id or 0
+    curr_esmo_id = current.esmo_id or 0
+    if cand_esmo_id > curr_esmo_id:
+        return True
+    if cand_esmo_id < curr_esmo_id:
+        return False
+
+    # Same timestamp/source id: keep deterministic latest inserted row.
+    return candidate.id > current.id
+
+
+def _local_day_bounds(day_value: date) -> tuple[datetime, datetime]:
+    # MedicalExam.timestamp is stored as local naive datetime (ESMO local time).
+    start_local = datetime(day_value.year, day_value.month, day_value.day)
     end_local = start_local + timedelta(days=1)
-    # Stored timestamps are UTC-naive in DB; compare with naive UTC bounds.
-    start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
-    end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
-    return start_utc, end_utc
+    return start_local, end_local
 
 
 def _ensure_esmo_enabled() -> None:
@@ -94,6 +111,66 @@ def _find_employee_for_esmo(db: Session, pass_id: str, full_name: str) -> Employ
     return None
 
 
+def _apply_exam_search(query, search: str):
+    terms = [part.strip() for part in search.split() if part.strip()]
+    if not terms:
+        return query
+
+    predicates = []
+    for term in terms:
+        q = f"%{term}%"
+        predicates.append(
+            or_(
+                MedicalExam.employee.has(Employee.employee_no.ilike(q)),
+                MedicalExam.employee.has(Employee.first_name.ilike(q)),
+                MedicalExam.employee.has(Employee.last_name.ilike(q)),
+                MedicalExam.employee.has(Employee.patronymic.ilike(q)),
+                MedicalExam.terminal_name.ilike(q),
+            )
+        )
+
+    return query.filter(and_(*predicates))
+
+
+def _compose_employee_full_name(exam: MedicalExam, payload_name: str | None) -> str:
+    if payload_name and payload_name.strip():
+        return payload_name.strip()
+    if exam.employee:
+        return f"{exam.employee.last_name} {exam.employee.first_name} {exam.employee.patronymic or ''}".strip()
+    return f"ID: {exam.employee_id}"
+
+
+def _serialize_medical_exams(db: Session, rows: list[MedicalExam]) -> list[MedicalExamRead]:
+    esmo_ids = [int(exam.esmo_id) for exam in rows if exam.esmo_id is not None]
+    payload_name_by_esmo_id: dict[int, str] = {}
+    if esmo_ids:
+        raw_ids = [f"esmo:{esmo_id}" for esmo_id in esmo_ids]
+        event_rows = (
+            db.query(Event.raw_id, Event.source_payload)
+            .filter(Event.raw_id.in_(raw_ids))
+            .all()
+        )
+        for raw_id, payload in event_rows:
+            if not raw_id:
+                continue
+            try:
+                esmo_id = int(str(raw_id).split(":", 1)[1])
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                full_name = (payload.get("employee_name") or "").strip()
+                if full_name:
+                    payload_name_by_esmo_id[esmo_id] = full_name
+
+    out: list[MedicalExamRead] = []
+    for exam in rows:
+        item = MedicalExamRead.model_validate(exam, from_attributes=True)
+        payload_name = payload_name_by_esmo_id.get(int(exam.esmo_id)) if exam.esmo_id is not None else None
+        item.employee_full_name = _compose_employee_full_name(exam, payload_name)
+        out.append(item)
+    return out
+
+
 def _list_esmo_employees_from_db(db: Session) -> list[dict]:
     rows = (
         db.query(EmployeeExternalID, Employee)
@@ -129,6 +206,7 @@ def get_medical_exams(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     search: Optional[str] = None,
+    latest_per_employee: bool = Query(default=False),
 ):
     """
     Get list of medical exams.
@@ -144,27 +222,34 @@ def get_medical_exams(
     if result:
         query = query.filter(MedicalExam.result == result)
     if start_date:
-        start_utc, _ = _local_day_bounds_utc(start_date)
-        query = query.filter(MedicalExam.timestamp >= start_utc)
+        start_local, _ = _local_day_bounds(start_date)
+        query = query.filter(MedicalExam.timestamp >= start_local)
     if end_date:
-        _, end_utc = _local_day_bounds_utc(end_date)
-        query = query.filter(MedicalExam.timestamp < end_utc)
+        _, end_local = _local_day_bounds(end_date)
+        query = query.filter(MedicalExam.timestamp < end_local)
     if search:
-        q = f"%{search.strip()}%"
-        query = query.join(Employee, isouter=True).filter(
-            or_(
-                Employee.employee_no.ilike(q),
-                Employee.first_name.ilike(q),
-                Employee.last_name.ilike(q),
-                Employee.patronymic.ilike(q),
-                MedicalExam.terminal_name.ilike(q),
-            )
-        )
+        query = _apply_exam_search(query, search)
         
     # Order by newest first
-    query = query.order_by(MedicalExam.timestamp.desc())
-    
-    return query.offset(skip).limit(limit).all()
+    query = query.order_by(MedicalExam.timestamp.desc(), MedicalExam.id.desc())
+
+    if latest_per_employee:
+        all_rows = query.all()
+        latest_by_employee: dict[int, MedicalExam] = {}
+        for exam in all_rows:
+            current = latest_by_employee.get(exam.employee_id)
+            if current is None or _is_newer_exam(exam, current):
+                latest_by_employee[exam.employee_id] = exam
+        deduped_rows = sorted(
+            latest_by_employee.values(),
+            key=lambda item: (item.timestamp, item.esmo_id or 0, item.id),
+            reverse=True,
+        )
+        paged_rows = deduped_rows[skip : skip + limit]
+        return _serialize_medical_exams(db, paged_rows)
+
+    rows = query.offset(skip).limit(limit).all()
+    return _serialize_medical_exams(db, rows)
 
 @router.get("/stats")
 def get_medical_stats(
@@ -177,12 +262,12 @@ def get_medical_stats(
     if target_date is None:
         target_date = datetime.now(timezone(timedelta(hours=5))).date()
 
-    start_utc, end_utc = _local_day_bounds_utc(target_date)
+    start_local, end_local = _local_day_bounds(target_date)
     
     query = db.query(MedicalExam).filter(
         MedicalExam.terminal_name.in_(get_allowed_esmo_terminal_names()),
-        MedicalExam.timestamp >= start_utc,
-        MedicalExam.timestamp < end_utc
+        MedicalExam.timestamp >= start_local,
+        MedicalExam.timestamp < end_local
     )
     
     total = query.count()
@@ -271,6 +356,16 @@ def sync_esmo_employees(db: Session = Depends(deps.get_db)):
             db.flush()
         else:
             # Backfill optional profile fields if MineTrack side is empty.
+            last_name, first_name, patronymic = _split_full_name(full_name)
+            if patronymic and not (employee.patronymic or "").strip():
+                employee.patronymic = patronymic
+            if last_name and (
+                not (employee.last_name or "").strip()
+                or (employee.last_name or "").strip().lower() in {"unknown", "-"}
+            ):
+                employee.last_name = last_name
+            if first_name and not (employee.first_name or "").strip():
+                employee.first_name = first_name
             if department and not employee.department:
                 employee.department = department
             if position and not employee.position:

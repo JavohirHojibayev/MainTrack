@@ -17,6 +17,18 @@ import { useAppTheme } from "@/context/ThemeContext";
 
 const roles = ["admin", "superadmin", "dispatcher", "medical", "warehouse", "viewer"];
 
+function extractApiErrorMessage(error: unknown): string {
+    const fallback = "Unknown error";
+    if (!(error instanceof Error)) return fallback;
+    try {
+        const parsed = JSON.parse(error.message);
+        if (typeof parsed?.detail === "string") return parsed.detail;
+    } catch {
+        // keep original message
+    }
+    return error.message || fallback;
+}
+
 export default function AdminUsersPage() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
@@ -40,23 +52,45 @@ export default function AdminUsersPage() {
     const [userToDelete, setUserToDelete] = useState<User | null>(null);
     const [deleting, setDeleting] = useState(false);
 
-    const load = () => {
+    const load = async () => {
         setLoading(true);
-        fetchUsers().then(setUsers).catch(console.error).finally(() => setLoading(false));
+        try {
+            const data = await fetchUsers();
+            setUsers(data);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    useEffect(() => { load(); }, []);
+    useEffect(() => { void load(); }, []);
+
+    const usernameError = newUser.username.trim().length > 0 && newUser.username.trim().length < 3;
+    const passwordError = newUser.password.length > 0 && newUser.password.length < 6;
+    const canCreate =
+        newUser.username.trim().length >= 3 &&
+        newUser.password.length >= 6 &&
+        roles.includes(newUser.role);
 
     const handleCreate = async () => {
+        if (!canCreate) {
+            alert("Username: minimum 3 ta belgi, Password: minimum 6 ta belgi.");
+            return;
+        }
         setCreating(true);
         try {
-            await createUser(newUser);
+            await createUser({
+                username: newUser.username.trim(),
+                password: newUser.password,
+                role: newUser.role,
+            });
             setCreateOpen(false);
             setNewUser({ username: "", password: "", role: "viewer" });
-            load();
+            await load();
         } catch (e: any) {
             console.error(e);
-            alert("Error creating user: " + (e.message || "Unknown error"));
+            alert("Error creating user: " + extractApiErrorMessage(e));
         } finally {
             setCreating(false);
         }
@@ -105,7 +139,7 @@ export default function AdminUsersPage() {
                 display: "inline-block"
             }}>{t("adminUsers.title")}</Typography>
 
-            <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
+            <Box sx={{ width: "fit-content", minWidth: 800 }}>
                 <GlassCard sx={{ width: "fit-content", minWidth: 800 }}>
                     <Table size="small">
                         <TableHead>
@@ -118,9 +152,9 @@ export default function AdminUsersPage() {
                             </TableRow>
                         </TableHead>
                         <TableBody>
-                            {users.map((u) => (
+                            {users.map((u, index) => (
                                 <TableRow key={u.id}>
-                                    <TableCell>{u.id}</TableCell>
+                                    <TableCell>{index + 1}</TableCell>
                                     <TableCell sx={{ fontWeight: 600 }}>{u.username}</TableCell>
                                     <TableCell><StatusPill status={u.role.toUpperCase()} /></TableCell>
                                     <TableCell sx={{ textAlign: "center" }}><StatusPill status={u.is_active ? "OK" : "OFFLINE"} /></TableCell>
@@ -152,24 +186,26 @@ export default function AdminUsersPage() {
                     </Table>
                 </GlassCard>
 
-                <Button
-                    variant="contained" startIcon={<AddIcon />}
-                    onClick={() => setCreateOpen(true)}
-                    sx={{
-                        borderRadius: "12px",
-                        textTransform: "none",
-                        fontWeight: 600,
-                        whiteSpace: "nowrap",
-                        background: "linear-gradient(45deg, #2563eb, #06b6d4)",
-                        boxShadow: "0 4px 14px 0 rgba(37,99,235,0.39)",
-                        "&:hover": {
-                            background: "linear-gradient(45deg, #1d4ed8, #0891b2)",
-                            boxShadow: "0 6px 20px 0 rgba(37,99,235,0.23)"
-                        }
-                    }}
-                >
-                    {t("adminUsers.createUser")}
-                </Button>
+                <Box sx={{ mt: 2, display: "flex", justifyContent: "flex-end" }}>
+                    <Button
+                        variant="contained" startIcon={<AddIcon />}
+                        onClick={() => setCreateOpen(true)}
+                        sx={{
+                            borderRadius: "12px",
+                            textTransform: "none",
+                            fontWeight: 600,
+                            whiteSpace: "nowrap",
+                            background: "linear-gradient(45deg, #2563eb, #06b6d4)",
+                            boxShadow: "0 4px 14px 0 rgba(37,99,235,0.39)",
+                            "&:hover": {
+                                background: "linear-gradient(45deg, #1d4ed8, #0891b2)",
+                                boxShadow: "0 6px 20px 0 rgba(37,99,235,0.23)"
+                            }
+                        }}
+                    >
+                        {t("adminUsers.createUser")}
+                    </Button>
+                </Box>
             </Box>
 
             {/* Create User Dialog */}
@@ -196,6 +232,8 @@ export default function AdminUsersPage() {
                             value={newUser.username}
                             onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
                             variant="filled"
+                            error={usernameError}
+                            helperText={usernameError ? "Minimum 3 characters" : ""}
                             InputProps={{ disableUnderline: true, sx: { borderRadius: "12px" } }}
                         />
                         <TextField
@@ -205,9 +243,22 @@ export default function AdminUsersPage() {
                             value={newUser.password}
                             onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
                             variant="filled"
+                            error={passwordError}
                             InputProps={{ disableUnderline: true, sx: { borderRadius: "12px" } }}
                             helperText="Minimum 6 characters"
                         />
+                        <Select
+                            fullWidth
+                            value={newUser.role}
+                            onChange={(e) => setNewUser({ ...newUser, role: String(e.target.value) })}
+                            variant="filled"
+                            disableUnderline
+                            sx={{ borderRadius: "12px" }}
+                        >
+                            {roles.map((role) => (
+                                <MenuItem key={role} value={role}>{role.toUpperCase()}</MenuItem>
+                            ))}
+                        </Select>
                     </Box>
                 </DialogContent>
                 <DialogActions sx={{ p: 3 }}>
@@ -215,7 +266,7 @@ export default function AdminUsersPage() {
                     <Button
                         onClick={handleCreate}
                         variant="contained"
-                        disabled={creating}
+                        disabled={creating || !canCreate}
                         startIcon={creating ? <CircularProgress size={16} /> : null}
                         sx={{
                             borderRadius: "12px",

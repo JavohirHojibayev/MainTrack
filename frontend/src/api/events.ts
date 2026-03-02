@@ -15,6 +15,7 @@ export interface EventRow {
     last_name?: string;
     patronymic?: string;
     device_name?: string;
+    device_host?: string;
 }
 
 export interface EventFilters {

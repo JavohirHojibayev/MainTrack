@@ -51,6 +51,7 @@ export default function EsmoJournalPage() {
                 end_date: appliedFilters.end_date || undefined,
                 search: appliedFilters.search.trim() || undefined,
                 limit: 5000,
+                latest_per_employee: false,
             });
             setRows(data);
         } catch (err) {
@@ -100,6 +101,7 @@ export default function EsmoJournalPage() {
             width: 330,
             hideable: false,
             valueGetter: (_value, row) => {
+                if (row.employee_full_name) return row.employee_full_name;
                 const emp = row.employee;
                 return emp ? [emp.last_name, emp.first_name, emp.patronymic].filter(Boolean).join(" ") : `ID: ${row.employee_id}`;
             }
@@ -129,13 +131,24 @@ export default function EsmoJournalPage() {
         {
             field: "pulse",
             headerName: t("esmo.col.pulse") || "Pulse",
-            width: 100
+            width: 100,
+            valueGetter: (_value, row) => (row.pulse == null ? "-" : String(row.pulse)),
         },
         {
             field: "temperature",
             headerName: t("esmo.col.temperature") || "Temp",
             width: 100,
-            valueFormatter: (value) => (value == null ? "-" : `${value}\u00B0C`)
+            valueGetter: (_value, row) => {
+                const raw = row.temperature;
+                if (raw == null) return "-";
+                if (typeof raw === "number") {
+                    return `${Number.isInteger(raw) ? raw.toFixed(0) : raw.toFixed(1)}\u00B0C`;
+                }
+                const normalized = String(raw).replace(",", ".");
+                const parsed = Number(normalized);
+                if (!Number.isFinite(parsed)) return "-";
+                return `${Number.isInteger(parsed) ? parsed.toFixed(0) : parsed.toFixed(1)}\u00B0C`;
+            },
         },
         {
             field: "result",
@@ -152,6 +165,7 @@ export default function EsmoJournalPage() {
     ];
 
     const getFullName = (row: MedicalExam) => {
+        if (row.employee_full_name) return row.employee_full_name;
         const emp = row.employee;
         return emp ? [emp.last_name, emp.first_name, emp.patronymic].filter(Boolean).join(" ") : `ID: ${row.employee_id}`;
     };

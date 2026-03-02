@@ -36,3 +36,13 @@ class DeviceOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DeviceDataStatusOut(BaseModel):
+    device_id: int
+    last_data_at: datetime | None = None
+
+
+class DevicePowerToggle(BaseModel):
+    password: str
+    is_active: bool

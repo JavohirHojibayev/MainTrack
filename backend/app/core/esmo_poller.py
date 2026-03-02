@@ -11,11 +11,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.esmo_client import EsmoClient
+from app.core.esmo_monitoring import record_poller_metrics
 from app.db.session import SessionLocal
 from app.models.device import Device, DeviceType
 from app.models.employee import Employee
@@ -65,6 +67,14 @@ ESMO_TERMINALS: list[dict[str, str]] = [
 ]
 _TERMINALS_BY_NAME = {t["name"]: t for t in ESMO_TERMINALS}
 _TERMINALS_BY_NUM = {str(i): term for i, term in enumerate(ESMO_TERMINALS, start=1)}
+# ESMO portal can expose terminal IDs in bracket form: terminal [7..10].
+# Map those stable IDs to approved MineTrack TKM terminals.
+_TERMINAL_SLOT_TO_TKM_NUM = {
+    "7": "1",
+    "8": "2",
+    "9": "3",
+    "10": "4",
+}
 
 
 def get_allowed_esmo_terminal_names() -> set[str]:
@@ -86,6 +96,20 @@ def _resolve_esmo_terminal(raw_terminal_name: str | None) -> dict[str, str] | No
     match = re.search(r"\bTKM\s*([1-4])\s*-\s*terminal\b", text, flags=re.IGNORECASE)
     if match:
         return _TERMINALS_BY_NUM.get(match.group(1))
+
+    # Example: "terminal [10]" -> TKM 4-terminal
+    slot_match = re.search(r"\bterminal\s*\[(\d{1,3})\]", text, flags=re.IGNORECASE)
+    if slot_match:
+        tkm_num = _TERMINAL_SLOT_TO_TKM_NUM.get(slot_match.group(1))
+        if tkm_num:
+            return _TERMINALS_BY_NUM.get(tkm_num)
+
+    # Example from compact rows: plain "10"
+    plain_num = re.fullmatch(r"\d{1,3}", text)
+    if plain_num:
+        tkm_num = _TERMINAL_SLOT_TO_TKM_NUM.get(plain_num.group(0))
+        if tkm_num:
+            return _TERMINALS_BY_NUM.get(tkm_num)
     return None
 
 
@@ -117,7 +141,6 @@ def _sync_allowed_esmo_devices(db: Session) -> int:
             existing.device_type = DeviceType.ESMO
             existing.location = "FACTORY"
             existing.api_key = terminal["api_key"]
-            existing.is_active = True
             existing.last_seen = now
         else:
             db.add(
@@ -204,6 +227,19 @@ def _find_or_create_employee_for_esmo(db: Session, pass_id: str | None, full_nam
 
     existing = _find_employee(db, pass_id, full_name)
     if existing:
+        # Backfill incomplete profile fields from ESMO full name when available.
+        if full_name:
+            last_name, first_name, patronymic = _split_full_name(full_name)
+            if patronymic and not (existing.patronymic or "").strip():
+                existing.patronymic = patronymic
+            if last_name and (
+                not (existing.last_name or "").strip()
+                or (existing.last_name or "").strip().lower() in {"unknown", "-"}
+            ):
+                existing.last_name = last_name
+            if first_name and not (existing.first_name or "").strip():
+                existing.first_name = first_name
+            db.flush()
         return existing
 
     if not pass_id:
@@ -231,15 +267,29 @@ def _find_or_create_employee_for_esmo(db: Session, pass_id: str | None, full_nam
     db.flush()
     return employee
 
-def _parse_esmo_time(time_str: str) -> datetime:
-    """Parse "23.02.2026 11:12" to datetime object."""
-    try:
-        # ESMO timestamps are local (Tashkent, UTC+5).
-        dt = datetime.strptime(time_str, "%d.%m.%Y %H:%M")
-        local_tz = timezone(timedelta(hours=5))
-        return dt.replace(tzinfo=local_tz).astimezone(timezone.utc)
-    except Exception:
-        return datetime.now(timezone.utc)
+def _parse_esmo_time_local(time_str: str) -> datetime:
+    """Parse ESMO local time string to timezone-aware Asia/Tashkent(+05:00)."""
+    local_tz = timezone(timedelta(hours=5))
+    text = (time_str or "").strip()
+    for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y %H:%M:%S"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.replace(tzinfo=local_tz)
+        except Exception:
+            continue
+    return datetime.now(local_tz)
+
+
+def _parse_esmo_time_utc(time_str: str) -> datetime:
+    """Parse ESMO local time string and convert to UTC."""
+    return _parse_esmo_time_local(time_str).astimezone(timezone.utc)
+
+
+def _local_naive_to_utc(dt_local_naive: datetime) -> datetime:
+    local_tz = timezone(timedelta(hours=5))
+    if dt_local_naive.tzinfo is None:
+        return dt_local_naive.replace(tzinfo=local_tz).astimezone(timezone.utc)
+    return dt_local_naive.astimezone(timezone.utc)
 
 def _get_or_create_esmo_device(db: Session) -> Device:
     """Ensure there is a synthetic ESMO source device for generated events."""
@@ -268,6 +318,93 @@ def _get_or_create_esmo_device(db: Session) -> Device:
     db.flush()
     return device
 
+
+def _repair_recent_incomplete_exams(
+    db: Session,
+    client: EsmoClient,
+    esmo_device_id: int,
+    limit: int = 120,
+) -> int:
+    """
+    Backfill pulse/temperature and other missing details for recent ESMO exams.
+    This protects against parser/layout changes where initial ingest saved partial data.
+    """
+    if not client.is_logged_in and not client.login():
+        return 0
+
+    allowed_terminal_names = tuple(get_allowed_esmo_terminal_names())
+    rows = (
+        db.query(MedicalExam)
+        .filter(
+            MedicalExam.esmo_id.isnot(None),
+            (
+                MedicalExam.pulse.is_(None)
+                | MedicalExam.temperature.is_(None)
+                | MedicalExam.terminal_name.is_(None)
+                | (~MedicalExam.terminal_name.in_(allowed_terminal_names))
+            ),
+        )
+        .order_by(MedicalExam.esmo_id.desc())
+        .limit(max(limit, 1))
+        .all()
+    )
+
+    repaired = 0
+    for exam in rows:
+        esmo_id = exam.esmo_id
+        if esmo_id is None:
+            continue
+
+        detail = client._fetch_exam_detail(int(esmo_id))
+        if not detail:
+            continue
+
+        changed = False
+
+        terminal_meta = _resolve_esmo_terminal(detail.get("terminal"))
+        if terminal_meta and exam.terminal_name != terminal_meta["name"]:
+            exam.terminal_name = terminal_meta["name"]
+            changed = True
+
+        parsed_result = (detail.get("result") or "").strip().lower()
+        if parsed_result in {"passed", "failed", "review"} and exam.result != parsed_result:
+            exam.result = parsed_result
+            changed = True
+
+        if detail.get("pressure_systolic") is not None and exam.pressure_systolic != detail.get("pressure_systolic"):
+            exam.pressure_systolic = detail.get("pressure_systolic")
+            changed = True
+        if detail.get("pressure_diastolic") is not None and exam.pressure_diastolic != detail.get("pressure_diastolic"):
+            exam.pressure_diastolic = detail.get("pressure_diastolic")
+            changed = True
+        if detail.get("pulse") is not None and exam.pulse != detail.get("pulse"):
+            exam.pulse = detail.get("pulse")
+            changed = True
+        if detail.get("temperature") is not None and exam.temperature != detail.get("temperature"):
+            exam.temperature = detail.get("temperature")
+            changed = True
+        if detail.get("alcohol_mg_l") is not None and exam.alcohol_mg_l != detail.get("alcohol_mg_l"):
+            exam.alcohol_mg_l = detail.get("alcohol_mg_l")
+            changed = True
+
+        if changed:
+            event = (
+                db.query(Event)
+                .filter(Event.device_id == esmo_device_id, Event.raw_id == f"esmo:{esmo_id}")
+                .first()
+            )
+            if event:
+                event.event_ts = _local_naive_to_utc(exam.timestamp)
+                event.event_type = EventType.ESMO_OK if exam.result == "passed" else EventType.ESMO_FAIL
+
+            try:
+                db.commit()
+                repaired += 1
+            except IntegrityError:
+                db.rollback()
+
+    return repaired
+
 def poll_esmo_once() -> int:
     """Fetch latest exams from ESMO and save to local DB."""
     if not settings.ESMO_ENABLED:
@@ -281,21 +418,76 @@ def poll_esmo_once() -> int:
         login_retries=settings.ESMO_LOGIN_RETRIES,
     )
 
-    exams = client.fetch_latest_exams()
-    if not exams:
-        if client.last_error:
-            logger.warning("ESMO poll returned no exams: %s", client.last_error)
-        return 0
+    probe_db: Session = SessionLocal()
+    try:
+        last_known_esmo_id = probe_db.query(func.max(MedicalExam.esmo_id)).scalar()
+    finally:
+        probe_db.close()
+
+    exams = client.fetch_exams_since(
+        since_esmo_id=last_known_esmo_id,
+        max_pages=max(settings.ESMO_BACKFILL_MAX_PAGES, 1),
+    )
+    # Safety-net backfill: re-read recent pages and import rows missing in local DB.
+    # This prevents data holes after temporary parser/layout changes or short outages.
+    recent_pages = min(max(settings.ESMO_BACKFILL_MAX_PAGES, 1), 4)
+    recent_candidates = client.fetch_exams_since(since_esmo_id=None, max_pages=recent_pages)
+    if recent_candidates:
+        candidate_ids = [int(r["esmo_id"]) for r in recent_candidates if isinstance(r.get("esmo_id"), int)]
+        existing_ids: set[int] = set()
+        if candidate_ids:
+            probe_db2: Session = SessionLocal()
+            try:
+                existing_ids = {
+                    int(row[0])
+                    for row in probe_db2.query(MedicalExam.esmo_id).filter(MedicalExam.esmo_id.in_(candidate_ids)).all()
+                    if row[0] is not None
+                }
+            finally:
+                probe_db2.close()
+
+        missing_recent = [r for r in recent_candidates if isinstance(r.get("esmo_id"), int) and int(r["esmo_id"]) not in existing_ids]
+        merged_by_id: dict[int, dict] = {
+            int(r["esmo_id"]): r for r in recent_candidates if isinstance(r.get("esmo_id"), int)
+        }
+        for row in exams:
+            if isinstance(row.get("esmo_id"), int):
+                merged_by_id[int(row["esmo_id"])] = row
+        exams = sorted(merged_by_id.values(), key=lambda x: int(x.get("esmo_id") or 0), reverse=True)
+        if missing_recent:
+            logger.info("ESMO Poller: added %d missing rows from recent %d pages", len(missing_recent), recent_pages)
+
+    if not exams and client.last_error:
+        logger.warning("ESMO poll returned no exams: %s", client.last_error)
+
+    if last_known_esmo_id:
+        logger.info(
+            "ESMO Poller: fetched %d candidate rows since esmo_id=%s",
+            len(exams),
+            last_known_esmo_id,
+        )
 
     db: Session = SessionLocal()
     saved_count = 0
+    repaired_count = 0
     unmatched_count = 0
     unknown_terminal_count = 0
+    disabled_terminal_count = 0
+    poll_error: str | None = None
     try:
         esmo_device = _get_or_create_esmo_device(db)
         created_terminal_devices = _sync_allowed_esmo_devices(db)
         db.commit()
         db.refresh(esmo_device)
+        terminal_active_by_code = {
+            str(d.device_code): bool(d.is_active)
+            for d in db.query(Device)
+            .filter(
+                Device.device_type == DeviceType.ESMO,
+                Device.device_code.in_([t["device_code"] for t in ESMO_TERMINALS]),
+            )
+            .all()
+        }
         if created_terminal_devices:
             logger.info("ESMO Poller: Added %d terminal devices", created_terminal_devices)
 
@@ -308,6 +500,11 @@ def poll_esmo_once() -> int:
             if not terminal_meta:
                 unknown_terminal_count += 1
                 continue
+            terminal_name = terminal_meta["name"]
+            terminal_code = terminal_meta["device_code"]
+            if not terminal_active_by_code.get(terminal_code, True):
+                disabled_terminal_count += 1
+                continue
 
             # Find employee
             pass_id = ex.get("employee_pass_id")
@@ -319,7 +516,8 @@ def poll_esmo_once() -> int:
                 unmatched_count += 1
                 continue
 
-            exam_ts = _parse_esmo_time(ex.get("timestamp"))
+            exam_ts_local_naive = _parse_esmo_time_local(str(ex.get("timestamp") or "")).replace(tzinfo=None)
+            exam_ts_utc = _parse_esmo_time_utc(str(ex.get("timestamp") or ""))
 
             # Upsert medical exam record.
             existing_exam = db.query(MedicalExam).filter(MedicalExam.esmo_id == esmo_id).first()
@@ -339,24 +537,24 @@ def poll_esmo_once() -> int:
                 exam_record = MedicalExam(
                     employee_id=employee.id,
                     esmo_id=esmo_id,
-                    terminal_name=terminal_meta["name"],
+                    terminal_name=terminal_name,
                     result=result,
                     pressure_systolic=ex.get("pressure_systolic"),
                     pressure_diastolic=ex.get("pressure_diastolic"),
                     pulse=ex.get("pulse"),
                     temperature=ex.get("temperature"),
                     alcohol_mg_l=ex.get("alcohol_mg_l"),
-                    timestamp=exam_ts,
+                    timestamp=exam_ts_local_naive,
                 )
                 db.add(exam_record)
                 saved_count += 1
             else:
                 # Keep historical records corrected if parser improves or manual-review state appears later.
                 existing_exam.employee_id = employee.id
-                existing_exam.terminal_name = terminal_meta["name"]
+                existing_exam.terminal_name = terminal_name
                 if result:
                     existing_exam.result = result
-                existing_exam.timestamp = exam_ts
+                existing_exam.timestamp = exam_ts_local_naive
                 if ex.get("pressure_systolic") is not None:
                     existing_exam.pressure_systolic = ex.get("pressure_systolic")
                 if ex.get("pressure_diastolic") is not None:
@@ -382,7 +580,7 @@ def poll_esmo_once() -> int:
                         device_id=esmo_device.id,
                         employee_id=employee.id,
                         event_type=event_type,
-                        event_ts=exam_ts,
+                        event_ts=exam_ts_utc,
                         raw_id=event_raw_id,
                         status=EventStatus.ACCEPTED,
                         reject_reason=None,
@@ -391,7 +589,7 @@ def poll_esmo_once() -> int:
                 )
             else:
                 existing_event.event_type = EventType.ESMO_OK if result == "passed" else EventType.ESMO_FAIL
-                existing_event.event_ts = exam_ts
+                existing_event.event_ts = exam_ts_utc
                 existing_event.source_payload = ex
 
             try:
@@ -399,19 +597,44 @@ def poll_esmo_once() -> int:
             except IntegrityError:
                 db.rollback()
 
+        repaired_count = _repair_recent_incomplete_exams(db, client, esmo_device.id)
+
         if saved_count > 0:
             logger.info("ESMO Poller: Saved %d new medical exams", saved_count)
+        if repaired_count > 0:
+            logger.info("ESMO Poller: Repaired %d recent incomplete exams", repaired_count)
         if unmatched_count > 0:
             logger.info("ESMO Poller: %d exams skipped due to missing employee mapping", unmatched_count)
         if unknown_terminal_count > 0:
             logger.info("ESMO Poller: %d exams skipped due to non-approved terminal", unknown_terminal_count)
+        if disabled_terminal_count > 0:
+            logger.info("ESMO Poller: %d exams skipped due to disabled terminal", disabled_terminal_count)
     except Exception as e:
         logger.error("ESMO Poller error: %s", e)
+        poll_error = str(e)
         db.rollback()
     finally:
+        fetched_count = len(exams)
+        record_poller_metrics(
+            fetched=fetched_count,
+            saved=saved_count,
+            repaired=repaired_count,
+            unknown_terminal=unknown_terminal_count,
+            unmatched=unmatched_count,
+            error=poll_error,
+        )
+        logger.info(
+            "ESMO Poller metrics: fetched=%d saved=%d repaired=%d unknown_terminal=%d unmatched=%d error=%s",
+            fetched_count,
+            saved_count,
+            repaired_count,
+            unknown_terminal_count,
+            unmatched_count,
+            poll_error or "none",
+        )
         db.close()
     
-    return saved_count
+    return saved_count + repaired_count
 
 async def esmo_polling_loop():
     """Background async loop for ESMO polling."""

@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -54,6 +54,26 @@ def _has_recent_esmo_ok(db: Session, employee_id: int, event_ts: datetime) -> bo
         .first()
     )
     return exists is not None
+
+
+def _apply_employee_search(query, search: str):
+    terms = [part.strip() for part in search.split() if part.strip()]
+    if not terms:
+        return query
+
+    predicates = []
+    for term in terms:
+        q = f"%{term}%"
+        predicates.append(
+            or_(
+                Event.employee.has(Employee.employee_no.ilike(q)),
+                Event.employee.has(Employee.first_name.ilike(q)),
+                Event.employee.has(Employee.last_name.ilike(q)),
+                Event.employee.has(Employee.patronymic.ilike(q)),
+            )
+        )
+
+    return query.filter(and_(*predicates))
 
 
 @router.post("/ingest", response_model=list[EventResult])
@@ -306,16 +326,9 @@ def list_events(
     if status:
         query = query.filter(Event.status == status)
     if employee_no:
-        query = query.join(Employee).filter(Employee.employee_no.ilike(f"%{employee_no}%"))
+        query = query.filter(Event.employee.has(Employee.employee_no.ilike(f"%{employee_no.strip()}%")))
     if search:
-        query = query.join(Employee, isouter=True).filter(
-            or_(
-                Employee.employee_no.ilike(f"%{search}%"),
-                Employee.first_name.ilike(f"%{search}%"),
-                Employee.last_name.ilike(f"%{search}%"),
-                Employee.patronymic.ilike(f"%{search}%"),
-            )
-        )
+        query = _apply_employee_search(query, search)
     
     # Eager load employee for display
     # Eager load employee and device for display
@@ -354,16 +367,9 @@ def list_events_paged(
     if status:
         query = query.filter(Event.status == status)
     if employee_no:
-        query = query.join(Employee).filter(Employee.employee_no.ilike(f"%{employee_no}%"))
+        query = query.filter(Event.employee.has(Employee.employee_no.ilike(f"%{employee_no.strip()}%")))
     if search:
-        query = query.join(Employee, isouter=True).filter(
-            or_(
-                Employee.employee_no.ilike(f"%{search}%"),
-                Employee.first_name.ilike(f"%{search}%"),
-                Employee.last_name.ilike(f"%{search}%"),
-                Employee.patronymic.ilike(f"%{search}%"),
-            )
-        )
+        query = _apply_employee_search(query, search)
 
     total = query.count()
     items = (

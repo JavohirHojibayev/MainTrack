@@ -37,6 +37,8 @@ DEVICE_IP_MAP = {
     "192.168.0.223": {"name": "Kirish-1", "direction": EventType.TURNSTILE_IN},
     "192.168.0.221": {"name": "Kirish-2", "direction": EventType.TURNSTILE_IN},
     "192.168.0.219": {"name": "Kirish-3", "direction": EventType.TURNSTILE_IN},
+    "192.168.1.181": {"name": "shaxta kirish", "direction": EventType.TURNSTILE_IN},
+    "192.168.1.180": {"name": "shaxta chiqish", "direction": EventType.TURNSTILE_OUT},
     "192.168.0.224": {"name": "Chiqish-1", "direction": EventType.TURNSTILE_OUT},
     "192.168.0.222": {"name": "Chiqish-2", "direction": EventType.TURNSTILE_OUT},
     "192.168.0.220": {"name": "Chiqish-3", "direction": EventType.TURNSTILE_OUT},
@@ -224,6 +226,18 @@ def _parse_hikvision_time(time_str: str) -> datetime:
         return datetime.now(timezone(timedelta(hours=5)))
 
 
+def _select_event_ts(ip_address: str, event_data: dict, server_now: datetime) -> datetime:
+    """Use payload timestamp when available, fallback to server time.
+
+    This prevents replayed historical buffers from appearing as "current"
+    passes when devices resend old events.
+    """
+    raw = str(event_data.get("dateTime") or event_data.get("time") or "").strip()
+    if raw:
+        return _parse_hikvision_time(raw)
+    return server_now
+
+
 @router.post("/webhook", include_in_schema=False)
 def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
     """
@@ -316,6 +330,9 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
         device = _get_or_create_device_by_ip(db, ip_address, event_data.get("macAddress", ""))
         if not device:
             return Response(status_code=200, content="OK")
+        if not device.is_active:
+            logger.info("Ignored webhook event from disabled device: %s", device.device_code)
+            return Response(status_code=200, content="OK")
 
         # Check duplicate
         existing = (
@@ -334,9 +351,8 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
             # Still save the event with a log, but skip if no employee
             return Response(status_code=200, content="OK")
 
-        # Create event
-        # FORCE SERVER TIME (User request: turnstile time is wrong/unreliable)
         server_now = datetime.now(timezone(timedelta(hours=5)))
+        event_ts = _select_event_ts(ip_address, event_data, server_now)
         
         # Determine event type
         event_type = _determine_direction(ip_address, event_data)
@@ -348,8 +364,8 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
                 Event.device_id == device.id,
                 Event.employee_id == employee.id,
                 Event.event_type == event_type,
-                Event.event_ts >= server_now - timedelta(seconds=DEDUP_SECONDS),
-                Event.event_ts <= server_now + timedelta(seconds=1),
+                Event.event_ts >= event_ts - timedelta(seconds=DEDUP_SECONDS),
+                Event.event_ts <= event_ts + timedelta(seconds=1),
             )
             .first()
         )
@@ -359,15 +375,11 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
             print(f"DEBUG: Debounced duplicate event for {employee_no}")
             return Response(status_code=200, content="OK")
 
-        # Create event
-        # FORCE SERVER TIME (User request: turnstile time is wrong/unreliable)
-        # server_now is defined above
-        
         event = Event(
             device_id=device.id,
             employee_id=employee.id,
             event_type=event_type,
-            event_ts=server_now, 
+            event_ts=event_ts,
             raw_id=raw_id,
             status=EventStatus.ACCEPTED,
             source_payload=event_data,
@@ -379,9 +391,9 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
             employee_no,
             event.event_type.value,
             ip_address,
-            server_now,
+            event_ts,
         )
-        print(f"DEBUG: Saved event for {employee_no} at {server_now}")
+        print(f"DEBUG: Saved event for {employee_no} at {event_ts}")
     except IntegrityError:
         db.rollback()
     except Exception as exc:

@@ -27,6 +27,7 @@ class MedicalExamBase(BaseModel):
 class MedicalExamRead(MedicalExamBase):
     id: int
     employee_id: int
+    employee_full_name: Optional[str] = None
     employee: Optional[MedicalExamEmployee] = None
     
     class Config:

@@ -51,6 +51,12 @@ export default function TurnstileJournalPage() {
         return result;
     };
 
+    const getTurnstileDeviceName = (row: Pick<EventRow, "device_name" | "device_host" | "device_id">): string => {
+        if (row.device_host === "192.168.1.181") return "shaxta kirish";
+        if (row.device_host === "192.168.1.180") return "shaxta chiqish";
+        return row.device_name || String(row.device_id);
+    };
+
     const columns: GridColDef[] = [
         {
             field: "full_name",
@@ -69,7 +75,7 @@ export default function TurnstileJournalPage() {
             headerName: t("events.col.deviceId") || "Device",
             width: 190,
             hideable: false,
-            valueGetter: (value, row) => row.device_name || row.device_id
+            valueGetter: (_value, row) => getTurnstileDeviceName(row as EventRow),
         },
         {
             field: "status",
@@ -77,7 +83,7 @@ export default function TurnstileJournalPage() {
             width: 130,
             hideable: false,
             renderCell: (p) => {
-                const deviceName = String(p.row.device_name || "").toLowerCase();
+                const deviceName = getTurnstileDeviceName(p.row as EventRow).toLowerCase();
                 const isEntryByDevice = deviceName.includes("kirish") || deviceName.includes("entry");
                 const isExitByDevice = deviceName.includes("chiqish") || deviceName.includes("exit");
                 const isEntryByType = p.row.event_type === "TURNSTILE_IN" || p.row.event_type === "MINE_IN";
@@ -101,7 +107,7 @@ export default function TurnstileJournalPage() {
         if (fullRows.length === 0) return;
         const header = `${t("events.col.name")};${t("events.col.employeeNo")};${t("events.col.time")};${t("events.col.deviceId")};${t("events.col.status")}\n`;
         const csvRows = fullRows.map(r =>
-            `"${getFullName(r)}";"${r.employee_no || ""}";"${formatTime(r.event_ts)}";"${r.device_name || r.device_id}";"${r.status}"`
+            `"${getFullName(r)}";"${r.employee_no || ""}";"${formatTime(r.event_ts)}";"${getTurnstileDeviceName(r)}";"${r.status}"`
         ).join("\n");
         const blob = new Blob(["\uFEFF" + header + csvRows], { type: "text/csv;charset=utf-8;" });
         const url = URL.createObjectURL(blob);
@@ -139,7 +145,7 @@ export default function TurnstileJournalPage() {
             getFullName(r),
             r.employee_no || "",
             formatTime(r.event_ts),
-            r.device_name || String(r.device_id),
+            getTurnstileDeviceName(r),
             r.status,
         ]);
 

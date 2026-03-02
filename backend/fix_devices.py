@@ -12,6 +12,8 @@ DEVICE_IP_MAP = {
     "192.168.0.223": {"name": "Kirish-1"},
     "192.168.0.221": {"name": "Kirish-2"},
     "192.168.0.219": {"name": "Kirish-3"},
+    "192.168.1.181": {"name": "shaxta kirish"},
+    "192.168.1.180": {"name": "shaxta chiqish"},
     "192.168.0.224": {"name": "Chiqish-1"},
     "192.168.0.222": {"name": "Chiqish-2"},
     "192.168.0.220": {"name": "Chiqish-3"},
