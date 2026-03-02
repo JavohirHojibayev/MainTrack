@@ -367,7 +367,7 @@ def _repair_recent_incomplete_exams(
             changed = True
 
         parsed_result = (detail.get("result") or "").strip().lower()
-        if parsed_result in {"passed", "failed", "review"} and exam.result != parsed_result:
+        if parsed_result in {"passed", "failed", "review", "annulled"} and exam.result != parsed_result:
             exam.result = parsed_result
             changed = True
 
@@ -522,7 +522,7 @@ def poll_esmo_once() -> int:
             # Upsert medical exam record.
             existing_exam = db.query(MedicalExam).filter(MedicalExam.esmo_id == esmo_id).first()
             parsed_result = (ex.get("result") or "").strip().lower()
-            if parsed_result not in {"passed", "failed", "review"}:
+            if parsed_result not in {"passed", "failed", "review", "annulled"}:
                 if existing_exam:
                     result = existing_exam.result
                     logger.debug("ESMO Poller: keep existing result=%s for esmo_id=%s (parsed=%r)", result, esmo_id, parsed_result)

@@ -45,6 +45,7 @@ DEVICE_IP_MAP = {
 }
 
 DEDUP_SECONDS = max(settings.TURNSTILE_DEDUP_SECONDS, 1)
+MINE_HOSTS = {"192.168.1.180", "192.168.1.181"}
 
 
 # ─── Webhook Receiver (no auth — called by turnstile devices) ─────────
@@ -100,9 +101,72 @@ def _get_or_create_device_by_ip(db, ip: str, mac: str = "") -> Device | None:
     return device
 
 
-def _find_employee(db, employee_no: str) -> Employee | None:
+def _normalize_name(value: str | None) -> str:
+    text = (value or "").strip().lower()
+    if not text:
+        return ""
+    translate = str.maketrans({
+        "ё": "е",
+        "ў": "у",
+        "ғ": "г",
+        "қ": "к",
+        "ҳ": "х",
+        "’": "",
+        "'": "",
+        "`": "",
+    })
+    text = text.translate(translate)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _employee_short_name(employee: Employee) -> str:
+    return _normalize_name(f"{employee.last_name} {employee.first_name}")
+
+
+def _find_employee_by_name(db, payload_name: str) -> Employee | None:
+    normalized = _normalize_name(payload_name)
+    if not normalized:
+        return None
+
+    parts = normalized.split()
+    if len(parts) < 2:
+        return None
+
+    last_part, first_part = parts[0], parts[1]
+    candidates = (
+        db.query(Employee)
+        .filter(
+            Employee.last_name.ilike(f"{last_part}%"),
+            Employee.first_name.ilike(f"{first_part}%"),
+        )
+        .all()
+    )
+    exact = [c for c in candidates if _employee_short_name(c) == f"{last_part} {first_part}"]
+    if len(exact) == 1:
+        return exact[0]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def _find_employee(db, employee_no: str, payload_name: str, ip_address: str) -> Employee | None:
     """Find employee by Hikvision employee number."""
     if not employee_no:
+        return None
+
+    normalized_payload_name = _normalize_name(payload_name)
+
+    if ip_address in MINE_HOSTS:
+        by_name = _find_employee_by_name(db, payload_name)
+        if by_name:
+            return by_name
+        logger.debug(
+            "[%s] Webhook mine employee mapping failed: employee_no=%s payload_name=%s",
+            ip_address,
+            employee_no,
+            payload_name,
+        )
         return None
 
     # Try external ID lookup
@@ -115,10 +179,38 @@ def _find_employee(db, employee_no: str) -> Employee | None:
         .first()
     )
     if ext:
-        return db.query(Employee).filter(Employee.id == ext.employee_id).first()
+        employee = db.query(Employee).filter(Employee.id == ext.employee_id).first()
+        if employee and normalized_payload_name:
+            if _employee_short_name(employee) not in normalized_payload_name:
+                logger.debug(
+                    "[%s] Webhook external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+                    ip_address,
+                    employee_no,
+                    payload_name,
+                    employee.last_name,
+                    employee.first_name,
+                )
+                return None
+        return employee
 
     # Fallback: direct employee_no match
-    return db.query(Employee).filter(Employee.employee_no == employee_no).first()
+    employee = db.query(Employee).filter(Employee.employee_no == employee_no).first()
+    if not employee:
+        return None
+    if normalized_payload_name and _employee_short_name(employee) not in normalized_payload_name:
+        by_name = _find_employee_by_name(db, payload_name)
+        if by_name:
+            return by_name
+        logger.debug(
+            "[%s] Webhook employee_no name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+            ip_address,
+            employee_no,
+            payload_name,
+            employee.last_name,
+            employee.first_name,
+        )
+        return None
+    return employee
 
 
 def _flatten_hikvision_json(data: dict) -> dict:
@@ -131,6 +223,7 @@ def _flatten_hikvision_json(data: dict) -> dict:
         "eventType": data.get("eventType"),
         "eventState": data.get("eventState"),
         "eventDescription": data.get("eventDescription"),
+        "name": ace.get("name"),
         # Flattened fields from AccessControllerEvent
         "employeeNoString": ace.get("employeeNoString", ace.get("employeeNo")),
         "cardNo": ace.get("cardNo"),
@@ -182,6 +275,7 @@ def _parse_event_xml(xml_body: str) -> dict | None:
         "eventType": _text("eventType"),
         "eventState": _text("eventState"),
         "eventDescription": _text("eventDescription"),
+        "name": ace_data.get("name", ""),
         **ace_data,
     }
 
@@ -343,19 +437,40 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
         if existing:
             return Response(status_code=200, content="OK")
 
-        # Find employee
-        employee = _find_employee(db, employee_no)
-        if not employee:
-            logger.warning("Employee not found for ID: %s", employee_no)
-            print(f"DEBUG: Employee not found for ID: {employee_no}")
-            # Still save the event with a log, but skip if no employee
-            return Response(status_code=200, content="OK")
-
         server_now = datetime.now(timezone(timedelta(hours=5)))
         event_ts = _select_event_ts(ip_address, event_data, server_now)
         
         # Determine event type
         event_type = _determine_direction(ip_address, event_data)
+
+        payload_name = str(event_data.get("name", ""))
+        normalized_payload_name = _normalize_name(payload_name)
+
+        # Secondary dedup: same person can be emitted twice with different IDs/serials.
+        if normalized_payload_name:
+            nearby = (
+                db.query(Event)
+                .filter(
+                    Event.device_id == device.id,
+                    Event.event_type == event_type,
+                    Event.event_ts >= event_ts - timedelta(seconds=DEDUP_SECONDS),
+                    Event.event_ts <= event_ts + timedelta(seconds=DEDUP_SECONDS),
+                )
+                .all()
+            )
+            if any(
+                _normalize_name((evt.source_payload or {}).get("name", "")) == normalized_payload_name
+                for evt in nearby
+            ):
+                return Response(status_code=200, content="OK")
+
+        # Find employee
+        employee = _find_employee(db, employee_no, payload_name, ip_address)
+        if not employee:
+            logger.warning("Employee not found for ID: %s", employee_no)
+            print(f"DEBUG: Employee not found for ID: {employee_no}")
+            # Still save the event with a log, but skip if no employee
+            return Response(status_code=200, content="OK")
 
         # Debounce: ignore repeated reads from the same device in a short window.
         recent_event = (

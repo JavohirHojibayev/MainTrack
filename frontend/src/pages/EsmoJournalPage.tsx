@@ -82,6 +82,7 @@ export default function EsmoJournalPage() {
     const toDisplayStatus = (statusRaw: string) => {
         const s = String(statusRaw || "").toLowerCase();
         if (s === "passed") return t("status.passed");
+        if (s === "annulled") return "-";
         if (s === "review" || s === "manual_review" || s === "ko'rik" || s === "korik") return t("status.review");
         if (s === "failed" || s === "fail" || s === "rejected") return t("status.failed");
         return statusRaw || "-";
@@ -89,7 +90,7 @@ export default function EsmoJournalPage() {
     const toColorStatus = (statusRaw: string) => {
         const s = String(statusRaw || "").toLowerCase();
         if (s === "passed") return "ACCEPTED";
-        if (s === "review" || s === "manual_review") return "WARNING";
+        if (s === "review" || s === "manual_review" || s === "ko'rik" || s === "korik" || s === "annulled") return "WARNING";
         if (s === "failed" || s === "fail" || s === "rejected") return "REJECTED";
         return "WARNING";
     };

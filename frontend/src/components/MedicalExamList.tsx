@@ -92,7 +92,7 @@ export const MedicalExamList: React.FC<MedicalExamListProps> = ({ searchQuery = 
                     else if (s === "review" || s === "manual_review" || s === "ko'rik" || s === "korik") review += 1;
                     else if (s === "failed" || s === "fail" || s === "rejected") failed += 1;
                 }
-                onStatsChange({ passed, review, failed, total: dailyData.length });
+                onStatsChange({ passed, review, failed, total: passed + review + failed });
             }
         } catch (error) {
             console.error("Failed to load exams", error);
@@ -138,6 +138,7 @@ export const MedicalExamList: React.FC<MedicalExamListProps> = ({ searchQuery = 
     const toDisplayStatus = (statusRaw: string) => {
         const s = String(statusRaw || "").toLowerCase();
         if (s === "passed") return t("status.passed");
+        if (s === "annulled") return "-";
         if (s === "review" || s === "manual_review" || s === "ko'rik" || s === "korik") return t("status.review");
         if (s === "failed" || s === "fail" || s === "rejected") return t("status.failed");
         return statusRaw || "-";
@@ -146,7 +147,7 @@ export const MedicalExamList: React.FC<MedicalExamListProps> = ({ searchQuery = 
     const toColorStatus = (statusRaw: string) => {
         const s = String(statusRaw || "").toLowerCase();
         if (s === "passed") return "ACCEPTED";
-        if (s === "review" || s === "manual_review" || s === "ko'rik" || s === "korik") return "WARNING";
+        if (s === "review" || s === "manual_review" || s === "ko'rik" || s === "korik" || s === "annulled") return "WARNING";
         if (s === "failed" || s === "fail" || s === "rejected") return "REJECTED";
         return "WARNING";
     };

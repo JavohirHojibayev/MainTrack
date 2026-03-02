@@ -885,6 +885,27 @@ class EsmoClient:
         blob = " ".join(
             part for part in [row_text, comment_text, admittance_text, admittance_classes] if part
         ).lower()
+        # IMPORTANT:
+        # detect annulled state only from explicit status/comment fields.
+        # Do not scan full row text for broad "аннулиров*" fragments because
+        # action links like "Аннулировать допуск" can appear on regular passed rows.
+        annul_blob = " ".join(
+            part for part in [comment_text, admittance_text, admittance_classes] if part
+        ).lower()
+        annul_markers = (
+            "аннулировать мо",
+            "мо аннулирован",
+            "мо аннулирована",
+            "мо аннулировано",
+            "аннулирован мо",
+            "аннулирована мо",
+            "аннулировано мо",
+            "отменен мо",
+            "отмена мо",
+        )
+        if any(marker in annul_blob for marker in annul_markers):
+            # Annulled exam is not a successful pass; keep distinct marker for UI.
+            return "annulled"
         if self._detect_manual_review(blob, ""):
             return "review"
         has_pass_class = "dopusk_1" in admittance_classes or "dopusk_state_1" in admittance_classes

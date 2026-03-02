@@ -159,6 +159,7 @@ export default function DashboardPage() {
 
     const insideCount = dailySummary.filter((r) => Boolean(r.entered_today)).length;
     const outsideCount = dailySummary.filter((r) => Boolean(r.exited_today)).length;
+    const summaryInnerScrollEnabled = rowsPerPage > 10;
 
     return (
         <Box>
@@ -215,7 +216,12 @@ export default function DashboardPage() {
                         <Box sx={{ mb: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                             <Typography variant="h6" sx={{ color: tokens.status.ok, fontWeight: 700 }}>{t("dashboard.factoryActivity")}</Typography>
                         </Box>
-                        <TableContainer sx={{ maxHeight: 400 }}>
+                        <TableContainer
+                            sx={{
+                                maxHeight: summaryInnerScrollEnabled ? 400 : "none",
+                                overflowY: summaryInnerScrollEnabled ? "auto" : "visible",
+                            }}
+                        >
                             <Table size="small" stickyHeader sx={{ width: "100%", tableLayout: "fixed" }}>
                                 <TableHead>
                                     <TableRow>

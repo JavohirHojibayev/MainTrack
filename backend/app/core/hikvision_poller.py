@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+import re
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -48,6 +49,58 @@ DEDUP_SECONDS = max(settings.TURNSTILE_DEDUP_SECONDS, 1)
 LOCAL_TZ = timezone(timedelta(hours=5))
 INITIAL_LOOKBACK_HOURS = max(settings.HIKVISION_INITIAL_LOOKBACK_HOURS, 1)
 RECOVERY_OVERLAP_SECONDS = max(settings.HIKVISION_RECOVERY_OVERLAP_SECONDS, 0)
+MINE_HOSTS = {"192.168.1.180", "192.168.1.181"}
+LAST_CURSOR_UTC: dict[str, datetime] = {}
+
+
+def _normalize_name(value: str | None) -> str:
+    text = (value or "").strip().lower()
+    if not text:
+        return ""
+    translate = str.maketrans({
+        "ё": "е",
+        "ў": "у",
+        "ғ": "г",
+        "қ": "к",
+        "ҳ": "х",
+        "’": "",
+        "'": "",
+        "`": "",
+    })
+    text = text.translate(translate)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _employee_short_name(employee: Employee) -> str:
+    return _normalize_name(f"{employee.last_name} {employee.first_name}")
+
+
+def _find_employee_by_name(db: Session, payload_name: str) -> Employee | None:
+    normalized = _normalize_name(payload_name)
+    if not normalized:
+        return None
+
+    parts = normalized.split()
+    if len(parts) < 2:
+        return None
+
+    last_part, first_part = parts[0], parts[1]
+    candidates = (
+        db.query(Employee)
+        .filter(
+            Employee.last_name.ilike(f"{last_part}%"),
+            Employee.first_name.ilike(f"{first_part}%"),
+        )
+        .all()
+    )
+
+    exact = [c for c in candidates if _employee_short_name(c) == f"{last_part} {first_part}"]
+    if len(exact) == 1:
+        return exact[0]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
 
 
 def _parse_devices() -> list[dict]:
@@ -70,7 +123,7 @@ def _ensure_aware_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def _compute_poll_window(db: Session, device_id: int) -> tuple[str, str]:
+def _compute_poll_window(db: Session, device_id: int, host: str) -> tuple[str, str]:
     now_local = datetime.now(LOCAL_TZ)
 
     latest_event = (
@@ -83,9 +136,14 @@ def _compute_poll_window(db: Session, device_id: int) -> tuple[str, str]:
         .first()
     )
 
+    cursor_utc = LAST_CURSOR_UTC.get(host)
     if latest_event and latest_event[0]:
         last_event_utc = _ensure_aware_utc(latest_event[0])
+        if cursor_utc and cursor_utc > last_event_utc:
+            last_event_utc = cursor_utc
         start_local = last_event_utc.astimezone(LOCAL_TZ) - timedelta(seconds=RECOVERY_OVERLAP_SECONDS)
+    elif cursor_utc:
+        start_local = cursor_utc.astimezone(LOCAL_TZ) - timedelta(seconds=RECOVERY_OVERLAP_SECONDS)
     else:
         start_local = now_local - timedelta(hours=INITIAL_LOOKBACK_HOURS)
 
@@ -133,12 +191,34 @@ def _get_or_create_device(db: Session, device_info: dict) -> Device | None:
     return device
 
 
-def _find_employee_by_hikvision_id(db: Session, employee_no: str) -> Employee | None:
+def _find_employee_by_hikvision_id(
+    db: Session,
+    employee_no: str,
+    payload_name: str,
+    host: str,
+) -> Employee | None:
     """Find employee by Hikvision card/employee number.
 
     First tries EmployeeExternalID (system='HIKVISION'),
-    then falls back to employee_no match.
+    then falls back to employee_no match only when name validation passes.
+    Mine devices use name-based mapping to avoid ID-domain collisions.
     """
+    normalized_payload_name = _normalize_name(payload_name)
+
+    # Mine turnstiles may reuse employee numbers from another domain.
+    # For them, match by name first and do not trust plain employee_no fallback.
+    if host in MINE_HOSTS:
+        by_name = _find_employee_by_name(db, payload_name)
+        if by_name:
+            return by_name
+        logger.debug(
+            "[%s] Employee mapping failed for mine event: employee_no=%s payload_name=%s",
+            host,
+            employee_no,
+            payload_name,
+        )
+        return None
+
     # Try external ID lookup
     ext = (
         db.query(EmployeeExternalID)
@@ -149,10 +229,39 @@ def _find_employee_by_hikvision_id(db: Session, employee_no: str) -> Employee | 
         .first()
     )
     if ext:
-        return db.query(Employee).filter(Employee.id == ext.employee_id).first()
+        employee = db.query(Employee).filter(Employee.id == ext.employee_id).first()
+        if employee and normalized_payload_name:
+            if _employee_short_name(employee) not in normalized_payload_name:
+                logger.debug(
+                    "[%s] HIKVISION external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+                    host,
+                    employee_no,
+                    payload_name,
+                    employee.last_name,
+                    employee.first_name,
+                )
+                return None
+        return employee
 
     # Fallback: direct employee_no match
-    return db.query(Employee).filter(Employee.employee_no == employee_no).first()
+    employee = db.query(Employee).filter(Employee.employee_no == employee_no).first()
+    if not employee:
+        return None
+
+    if normalized_payload_name and _employee_short_name(employee) not in normalized_payload_name:
+        by_name = _find_employee_by_name(db, payload_name)
+        if by_name:
+            return by_name
+        logger.debug(
+            "[%s] HIKVISION employee_no name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+            host,
+            employee_no,
+            payload_name,
+            employee.last_name,
+            employee.first_name,
+        )
+        return None
+    return employee
 
 
 def _determine_event_type(event_data: dict, host: str, device_name: str) -> EventType:
@@ -227,14 +336,18 @@ def poll_single_device(device_info: dict) -> int:
             db.commit()
             return 0
 
-        start_time, end_time = _compute_poll_window(db, device.id)
+        start_time, end_time = _compute_poll_window(db, device.id, host)
         events = client.fetch_access_events(start_time, end_time)
         if not events:
             db.commit()
             return 0
 
+        max_seen_ts: datetime | None = None
         for evt_data in events:
             event_time_raw = str(evt_data.get("time", ""))
+            parsed_ts = _parse_hikvision_time(event_time_raw)
+            if max_seen_ts is None or parsed_ts > max_seen_ts:
+                max_seen_ts = parsed_ts
 
             # Check duplicate (by device_id + raw_id)
             # Find employee
@@ -256,13 +369,34 @@ def poll_single_device(device_info: dict) -> int:
             if existing:
                 continue
 
-            employee = _find_employee_by_hikvision_id(db, employee_no)
+            event_ts = parsed_ts
+            event_type = _determine_event_type(evt_data, host, device.name if device else name)
+            payload_name = str(evt_data.get("name", ""))
+            normalized_payload_name = _normalize_name(payload_name)
+
+            # Secondary dedup: some devices emit duplicated passages with different employeeNo/serialNo.
+            # If the same name appears on the same device/type in the dedup window, keep only one record.
+            if normalized_payload_name:
+                nearby = (
+                    db.query(Event)
+                    .filter(
+                        Event.device_id == device.id,
+                        Event.event_type == event_type,
+                        Event.event_ts >= event_ts - timedelta(seconds=DEDUP_SECONDS),
+                        Event.event_ts <= event_ts + timedelta(seconds=DEDUP_SECONDS),
+                    )
+                    .all()
+                )
+                if any(
+                    _normalize_name((evt.source_payload or {}).get("name", "")) == normalized_payload_name
+                    for evt in nearby
+                ):
+                    continue
+
+            employee = _find_employee_by_hikvision_id(db, employee_no, payload_name, host)
             if not employee:
                 logger.debug("Employee not found for Hikvision ID: %s", employee_no)
                 continue
-
-            event_ts = _parse_hikvision_time(event_time_raw)
-            event_type = _determine_event_type(evt_data, host, device.name if device else name)
 
             # Debounce repeated reads from the same passage.
             dup = (
@@ -297,6 +431,9 @@ def poll_single_device(device_info: dict) -> int:
                 saved_count += 1
             except IntegrityError:
                 db.rollback()  # Duplicate — skip silently
+
+        if max_seen_ts is not None:
+            LAST_CURSOR_UTC[host] = _ensure_aware_utc(max_seen_ts)
 
         logger.info(
             "[%s] Saved %d new events (window: %s -> %s)",
