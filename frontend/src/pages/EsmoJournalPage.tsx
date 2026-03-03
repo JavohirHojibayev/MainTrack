@@ -5,8 +5,10 @@ import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 import DownloadIcon from "@mui/icons-material/DownloadRounded";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfRounded";
 import GlassCard from "@/components/GlassCard";
+import LocalizedDateInput from "@/components/LocalizedDateInput";
 import StatusPill from "@/components/StatusPill";
 import { useAppTheme } from "@/context/ThemeContext";
+import { downloadXls } from "@/utils/exportXls";
 import { fetchMedicalExams, type MedicalExam } from "@/api/medical";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
@@ -179,19 +181,27 @@ export default function EsmoJournalPage() {
     const formatPulse = (pulse?: number) => (pulse == null ? "-" : String(pulse));
     const formatTemperature = (temperature?: number) => (temperature == null ? "-" : `${temperature}\u00B0C`);
 
-    const exportCSV = () => {
+    const exportXLS = () => {
         if (rows.length === 0) return;
-        const header = `${t("esmo.col.name")};${t("esmo.col.time")};${t("esmo.col.device")};${t("esmo.col.pressure")};${t("esmo.col.pulse")};${t("esmo.col.temperature")};${t("esmo.col.status")}\n`;
-        const csvRows = rows.map((r) =>
-            `"${getFullName(r)}";"${formatTime(r.timestamp)}";"${r.terminal_name || "-"}";"${formatPressure(r)}";"${formatPulse(r.pulse)}";"${formatTemperature(r.temperature)}";"${toDisplayStatus(String(r.result ?? ""))}"`
-        ).join("\n");
-
-        const blob = new Blob(["\uFEFF" + header + csvRows], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `esmo_journal_${new Date().toISOString().split("T")[0]}.csv`);
-        link.click();
+        const headers = [
+            t("esmo.col.name"),
+            t("esmo.col.time"),
+            t("esmo.col.device"),
+            t("esmo.col.pressure"),
+            t("esmo.col.pulse"),
+            t("esmo.col.temperature"),
+            t("esmo.col.status"),
+        ];
+        const dataRows = rows.map((r) => [
+            getFullName(r),
+            formatTime(r.timestamp),
+            r.terminal_name || "-",
+            formatPressure(r),
+            formatPulse(r.pulse),
+            formatTemperature(r.temperature),
+            toDisplayStatus(String(r.result ?? "")),
+        ]);
+        downloadXls(headers, dataRows, `esmo_journal_${new Date().toISOString().split("T")[0]}.xls`);
     };
 
     const exportPDF = async () => {
@@ -258,21 +268,15 @@ export default function EsmoJournalPage() {
                 <Box component="span" sx={pageTitleGradientSx}>{t("esmo.title")}</Box>
             </Typography>
             <Box sx={{ mb: 4, display: "flex", gap: 2, alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
-                <TextField
+                <LocalizedDateInput
                     label={t("esmo.dateFrom")}
-                    type="date"
                     value={filters.start_date}
-                    onChange={(e) => setFilters((f) => ({ ...f, start_date: e.target.value }))}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ minWidth: 160 }}
+                    onChange={(next) => setFilters((f) => ({ ...f, start_date: next }))}
                 />
-                <TextField
+                <LocalizedDateInput
                     label={t("esmo.dateTo")}
-                    type="date"
                     value={filters.end_date}
-                    onChange={(e) => setFilters((f) => ({ ...f, end_date: e.target.value }))}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ minWidth: 160 }}
+                    onChange={(next) => setFilters((f) => ({ ...f, end_date: next }))}
                 />
                 <TextField
                     label={t("esmo.search")}
@@ -282,7 +286,7 @@ export default function EsmoJournalPage() {
                     onKeyDown={(e) => {
                         if (e.key === "Enter") handleApply();
                     }}
-                    sx={{ minWidth: 200 }}
+                    sx={{ minWidth: 160 }}
                 />
                 <Button
                     variant="contained"
@@ -294,7 +298,7 @@ export default function EsmoJournalPage() {
                 <Button
                     variant="contained"
                     startIcon={<DownloadIcon />}
-                    onClick={exportCSV}
+                    onClick={exportXLS}
                     disabled={rows.length === 0 || loading}
                     sx={{ height: 40, borderRadius: "50px", textTransform: "none", fontWeight: "bold", whiteSpace: "nowrap", background: "linear-gradient(135deg, #06b6d4, #3b82f6)", "&:hover": { background: "linear-gradient(135deg, #0891b2, #2563eb)" } }}
                 >

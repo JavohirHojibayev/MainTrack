@@ -17,11 +17,20 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 import re
 
-from fastapi import APIRouter, Body, Depends, Request, Response
+from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.deps import get_current_user
+from app.core.hikvision_identity import (
+    HIKVISION_MINE_SYSTEM,
+    HIKVISION_SYSTEM,
+    MINE_HOSTS,
+    external_system_for_host,
+    find_employee_by_external_id,
+    normalize_external_id,
+    upsert_employee_external_id,
+)
 from app.db.session import SessionLocal
 from app.models.device import Device, DeviceType
 from app.models.employee import Employee
@@ -45,7 +54,6 @@ DEVICE_IP_MAP = {
 }
 
 DEDUP_SECONDS = max(settings.TURNSTILE_DEDUP_SECONDS, 1)
-MINE_HOSTS = {"192.168.1.180", "192.168.1.181"}
 
 
 # ─── Webhook Receiver (no auth — called by turnstile devices) ─────────
@@ -158,39 +166,32 @@ def _find_employee(db, employee_no: str, payload_name: str, ip_address: str) -> 
     normalized_payload_name = _normalize_name(payload_name)
 
     if ip_address in MINE_HOSTS:
-        by_name = _find_employee_by_name(db, payload_name)
-        if by_name:
-            return by_name
-        logger.debug(
-            "[%s] Webhook mine employee mapping failed: employee_no=%s payload_name=%s",
+        employee = find_employee_by_external_id(db, HIKVISION_MINE_SYSTEM, employee_no)
+        if employee:
+            return employee
+        logger.warning(
+            "[%s] Webhook mine mapping missing: employee_no=%s payload_name=%s system=%s",
             ip_address,
             employee_no,
             payload_name,
+            HIKVISION_MINE_SYSTEM,
         )
         return None
 
-    # Try external ID lookup
-    ext = (
-        db.query(EmployeeExternalID)
-        .filter(
-            EmployeeExternalID.system == "HIKVISION",
-            EmployeeExternalID.external_id == employee_no,
-        )
-        .first()
-    )
-    if ext:
-        employee = db.query(Employee).filter(Employee.id == ext.employee_id).first()
-        if employee and normalized_payload_name:
-            if _employee_short_name(employee) not in normalized_payload_name:
-                logger.debug(
-                    "[%s] Webhook external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
-                    ip_address,
-                    employee_no,
-                    payload_name,
-                    employee.last_name,
-                    employee.first_name,
-                )
-                return None
+    system = external_system_for_host(ip_address) or HIKVISION_SYSTEM
+    employee = find_employee_by_external_id(db, system, employee_no)
+    if employee and normalized_payload_name:
+        if _employee_short_name(employee) not in normalized_payload_name:
+            logger.debug(
+                "[%s] Webhook external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+                ip_address,
+                employee_no,
+                payload_name,
+                employee.last_name,
+                employee.first_name,
+            )
+            return None
+    if employee:
         return employee
 
     # Fallback: direct employee_no match
@@ -408,7 +409,20 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
         logger.debug("Ignoring non-access event: %s", event_data.get("eventType"))
         return Response(status_code=200, content="OK")
 
-    ip_address = event_data.get("ipAddress", request.client.host if request.client else "")
+    request_ip = request.client.host if request.client else ""
+    payload_ip = str(event_data.get("ipAddress", "")).strip()
+    ip_address = payload_ip or request_ip
+    if payload_ip and request_ip and payload_ip != request_ip:
+        logger.warning(
+            "Webhook source mismatch: request_ip=%s payload_ip=%s raw_id_hint=%s",
+            request_ip,
+            payload_ip,
+            event_data.get("serialNo", ""),
+        )
+    if ip_address and ip_address not in DEVICE_IP_MAP:
+        logger.warning("Ignoring webhook from unknown IP: %s (request_ip=%s)", ip_address, request_ip)
+        return Response(status_code=200, content="OK")
+
     employee_no = event_data.get("employeeNoString", event_data.get("cardNo", ""))
     serial_no = event_data.get("serialNo", "")
     event_time = event_data.get("dateTime", "")
@@ -497,7 +511,11 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
             event_ts=event_ts,
             raw_id=raw_id,
             status=EventStatus.ACCEPTED,
-            source_payload=event_data,
+            source_payload={
+                **event_data,
+                "source_host": ip_address,
+                "source_request_ip": request_ip,
+            },
         )
         db.add(event)
         db.commit()
@@ -569,6 +587,237 @@ def hikvision_status(_: Any = Depends(get_current_user)) -> dict:
             "mode": "webhook (HTTP Listening)",
             "total": len(devices),
             "devices": device_statuses,
+        }
+    finally:
+        db.close()
+
+
+@router.post("/sync-mine-id-mappings")
+def sync_mine_id_mappings(
+    current_user: Any = Depends(get_current_user),
+) -> dict:
+    """
+    Build/refresh strict EmployeeExternalID mappings for mine turnstiles.
+    - source IDs come from mine devices (employeeNo field)
+    - target system is EmployeeExternalID.system == 'HIKVISION_MINE'
+    - runtime mine ingestion then relies only on this mapping (no name fallback)
+    """
+    if current_user.role not in ("superadmin", "admin", "dispatcher"):
+        return Response(status_code=403, content="Not authorized")
+
+    try:
+        devices = json.loads(settings.HIKVISION_DEVICES)
+    except Exception:
+        return {"success": False, "message": "Invalid device config"}
+
+    mine_devices = [d for d in (devices or []) if str(d.get("host", "")).strip() in MINE_HOSTS]
+    if not mine_devices:
+        return {"success": False, "message": "No mine devices configured"}
+
+    from app.core.hikvision_client import HikvisionClient
+
+    db = SessionLocal()
+    scanned_users = 0
+    created = 0
+    updated = 0
+    unchanged = 0
+    unresolved = 0
+    conflicts = 0
+    unreachable: list[str] = []
+    unresolved_samples: list[dict[str, str]] = []
+
+    try:
+        for device_conf in mine_devices:
+            host = str(device_conf.get("host", "")).strip()
+            client = HikvisionClient(
+                host=host,
+                user=settings.HIKVISION_USER,
+                password=settings.HIKVISION_PASS,
+            )
+            if not client.check_connection():
+                unreachable.append(host)
+                continue
+
+            users = client.fetch_all_users()
+            for user_data in users:
+                scanned_users += 1
+                raw_external = str(user_data.get("employeeNo", "")).strip()
+                external_id = normalize_external_id(raw_external)
+                full_name = str(user_data.get("name", "")).strip()
+                if not external_id:
+                    continue
+
+                employee = _find_employee_by_name(db, full_name)
+                if not employee:
+                    unresolved += 1
+                    if len(unresolved_samples) < 100:
+                        unresolved_samples.append(
+                            {
+                                "host": host,
+                                "external_id": external_id,
+                                "name": full_name,
+                            }
+                        )
+                    continue
+
+                status = upsert_employee_external_id(
+                    db,
+                    employee_id=int(employee.id),
+                    system=HIKVISION_MINE_SYSTEM,
+                    external_id=external_id,
+                )
+                if status == "created":
+                    created += 1
+                elif status == "updated":
+                    updated += 1
+                elif status == "unchanged":
+                    unchanged += 1
+                elif status == "conflict_external_taken":
+                    conflicts += 1
+
+        db.commit()
+
+        return {
+            "success": True,
+            "system": HIKVISION_MINE_SYSTEM,
+            "devices": [str(d.get("host", "")).strip() for d in mine_devices],
+            "unreachable": unreachable,
+            "scanned_users": scanned_users,
+            "created": created,
+            "updated": updated,
+            "unchanged": unchanged,
+            "conflicts": conflicts,
+            "unresolved": unresolved,
+            "unresolved_samples": unresolved_samples,
+        }
+    except Exception as exc:
+        db.rollback()
+        logger.error("Mine mapping sync failed: %s", exc)
+        return {"success": False, "message": str(exc)}
+    finally:
+        db.close()
+
+
+@router.get("/source-audit")
+def hikvision_source_audit(
+    target_date: str | None = Query(default=None),
+    _: Any = Depends(get_current_user),
+) -> dict:
+    """
+    Verify that events are sourced from their own turnstile devices and
+    direction/host mapping remains consistent.
+    """
+    local_tz = timezone(timedelta(hours=5))
+    if target_date:
+        try:
+            day = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except ValueError:
+            return {"success": False, "message": "target_date must be YYYY-MM-DD"}
+    else:
+        day = datetime.now(local_tz).date()
+
+    start_local = datetime(day.year, day.month, day.day, tzinfo=local_tz)
+    end_local = start_local + timedelta(days=1)
+    start_utc = start_local.astimezone(timezone.utc)
+    end_utc = end_local.astimezone(timezone.utc)
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Event, Device)
+            .join(Device, Device.id == Event.device_id)
+            .filter(
+                Event.event_ts >= start_utc,
+                Event.event_ts < end_utc,
+                Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]),
+            )
+            .all()
+        )
+
+        by_host_type: dict[str, dict[str, int]] = {}
+        unknown_hosts = 0
+        wrong_direction = 0
+        payload_host_mismatch = 0
+        wrong_direction_samples: list[dict[str, str]] = []
+        payload_mismatch_samples: list[dict[str, str]] = []
+        mine_payload_ids: set[str] = set()
+
+        for event_obj, device_obj in rows:
+            host = str(device_obj.host or "")
+            event_type = str(event_obj.event_type.value if hasattr(event_obj.event_type, "value") else event_obj.event_type)
+            bucket = by_host_type.setdefault(host, {})
+            bucket[event_type] = bucket.get(event_type, 0) + 1
+
+            if host not in DEVICE_IP_MAP:
+                unknown_hosts += 1
+            else:
+                expected = DEVICE_IP_MAP[host]["direction"]
+                if event_obj.event_type != expected:
+                    wrong_direction += 1
+                    if len(wrong_direction_samples) < 30:
+                        wrong_direction_samples.append(
+                            {
+                                "event_id": str(event_obj.id),
+                                "host": host,
+                                "device_name": str(device_obj.name or ""),
+                                "event_type": event_type,
+                                "expected": str(expected.value if hasattr(expected, "value") else expected),
+                                "raw_id": str(event_obj.raw_id or ""),
+                            }
+                        )
+
+            payload = event_obj.source_payload or {}
+            payload_host = str(
+                payload.get("source_host")
+                or payload.get("ipAddress")
+                or payload.get("deviceIP")
+                or payload.get("devIp")
+                or ""
+            ).strip()
+            if payload_host and host and payload_host != host:
+                payload_host_mismatch += 1
+                if len(payload_mismatch_samples) < 30:
+                    payload_mismatch_samples.append(
+                        {
+                            "event_id": str(event_obj.id),
+                            "host": host,
+                            "payload_host": payload_host,
+                            "raw_id": str(event_obj.raw_id or ""),
+                        }
+                    )
+
+            if host in MINE_HOSTS:
+                payload_no = str(payload.get("employeeNoString") or payload.get("cardNo") or "").strip()
+                payload_no = normalize_external_id(payload_no)
+                if payload_no:
+                    mine_payload_ids.add(payload_no)
+
+        mapped_ids = {
+            str(row.external_id)
+            for row in db.query(EmployeeExternalID)
+            .filter(EmployeeExternalID.system == HIKVISION_MINE_SYSTEM)
+            .all()
+        }
+        mine_missing_mapping_ids = sorted(mine_payload_ids - mapped_ids)
+
+        return {
+            "success": True,
+            "date": day.isoformat(),
+            "total_events": len(rows),
+            "by_host_type": by_host_type,
+            "unknown_hosts": unknown_hosts,
+            "wrong_direction": wrong_direction,
+            "wrong_direction_samples": wrong_direction_samples,
+            "payload_host_mismatch": payload_host_mismatch,
+            "payload_host_mismatch_samples": payload_mismatch_samples,
+            "mine_payload_ids_seen": len(mine_payload_ids),
+            "mine_external_ids_mapped": len(mapped_ids),
+            "mine_missing_mapping_ids": mine_missing_mapping_ids[:200],
+            "mine_missing_mapping_count": len(mine_missing_mapping_ids),
+            "expected_direction_map": {
+                host: str(meta["direction"].value if hasattr(meta["direction"], "value") else meta["direction"])
+                for host, meta in DEVICE_IP_MAP.items()
+            },
         }
     finally:
         db.close()

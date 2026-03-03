@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useOutletContext } from "react-router-dom";
-import { Box, Typography, Button, CircularProgress } from "@mui/material";
+import { Box, Typography, Button, CircularProgress, TextField } from "@mui/material";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 import GlassCard from "@/components/GlassCard";
 import { fetchEmployees, type Employee } from "@/api/employees";
 import { syncHikvisionUsers } from "@/api/devices";
 import { fetchEsmoEmployees, syncEsmoEmployees, type EsmoEmployee } from "@/api/medical";
 import { useAppTheme } from "@/context/ThemeContext";
+import { employeeNoSearchHaystack, formatEmployeeNo } from "@/utils/employeeNo";
 
 export default function EmployeesPage() {
     const { t } = useTranslation();
@@ -19,28 +20,8 @@ export default function EmployeesPage() {
     const [esmoLoading, setEsmoLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [esmoSyncing, setEsmoSyncing] = useState(false);
-
-    const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
-        new Promise((resolve, reject) => {
-            const timer = window.setTimeout(() => reject(new Error("timeout")), ms);
-            promise
-                .then((value) => {
-                    window.clearTimeout(timer);
-                    resolve(value);
-                })
-                .catch((err) => {
-                    window.clearTimeout(timer);
-                    reject(err);
-                });
-        });
-
-    const loadEsmo = () => {
-        setEsmoLoading(true);
-        withTimeout(fetchEsmoEmployees(), 120000)
-            .then((esmoRows) => setEsmoEmployees(esmoRows))
-            .catch(() => { })
-            .finally(() => setEsmoLoading(false));
-    };
+    const [turnstileSearch, setTurnstileSearch] = useState("");
+    const [esmoSearch, setEsmoSearch] = useState("");
 
     const load = () => {
         setLoading(true);
@@ -48,10 +29,16 @@ export default function EmployeesPage() {
             .then((empRows) => setEmployees(empRows))
             .catch(() => setEmployees([]))
             .finally(() => setLoading(false));
-        loadEsmo();
     };
 
     useEffect(() => { load(); }, []);
+    useEffect(() => {
+        setEsmoLoading(true);
+        fetchEsmoEmployees()
+            .then((rows) => setEsmoEmployees(rows))
+            .catch(() => setEsmoEmployees([]))
+            .finally(() => setEsmoLoading(false));
+    }, []);
 
     const handleSync = async () => {
         setSyncing(true);
@@ -85,15 +72,46 @@ export default function EmployeesPage() {
         }
     };
 
-    const filteredEmployees = employees.filter(e => {
-        if (!searchQuery) return true;
-        const lowerQuery = searchQuery.toLowerCase();
+    const matchesTurnstileQuery = (e: Employee, query: string) => {
+        const lowerQuery = query.trim().toLowerCase();
+        if (!lowerQuery) return true;
         const fullName = `${e.last_name} ${e.first_name} ${e.patronymic || ""}`.toLowerCase();
-        return fullName.includes(lowerQuery) || e.employee_no.toLowerCase().includes(lowerQuery);
-    });
+        return (
+            fullName.includes(lowerQuery) ||
+            employeeNoSearchHaystack(e.employee_no).includes(lowerQuery) ||
+            (e.department || "").toLowerCase().includes(lowerQuery) ||
+            (e.position || "").toLowerCase().includes(lowerQuery)
+        );
+    };
+
+    const matchesEsmoQuery = (e: EsmoEmployee, query: string) => {
+        const lowerQuery = query.trim().toLowerCase();
+        if (!lowerQuery) return true;
+        return (
+            employeeNoSearchHaystack(e.pass_id || "").includes(lowerQuery) ||
+            String(e.full_name || "").toLowerCase().includes(lowerQuery) ||
+            String(e.organization || "").toLowerCase().includes(lowerQuery) ||
+            String(e.department || "").toLowerCase().includes(lowerQuery) ||
+            String(e.position || "").toLowerCase().includes(lowerQuery)
+        );
+    };
+
+    const filteredEmployees = employees.filter(
+        (e) => matchesTurnstileQuery(e, searchQuery) && matchesTurnstileQuery(e, turnstileSearch)
+    );
+
+    const filteredEsmoEmployees = esmoEmployees.filter(
+        (e) => matchesEsmoQuery(e, searchQuery) && matchesEsmoQuery(e, esmoSearch)
+    );
 
     const columns: GridColDef[] = [
-        { field: "employee_no", headerName: t("employees.col.employeeNo"), width: 150, hideable: false },
+        {
+            field: "employee_no",
+            headerName: t("employees.col.employeeNo"),
+            width: 150,
+            hideable: false,
+            valueGetter: (value) => formatEmployeeNo(value),
+        },
         {
             field: "full_name",
             headerName: t("employees.col.fullName"),
@@ -108,7 +126,7 @@ export default function EmployeesPage() {
     ];
 
     const esmoColumns: GridColDef[] = [
-        { field: "pass_id", headerName: t("employees.col.employeeNo"), width: 120 },
+        { field: "pass_id", headerName: t("employees.col.employeeNo"), width: 120, valueGetter: (value) => formatEmployeeNo(value) },
         { field: "full_name", headerName: t("employees.col.fullName"), flex: 1, minWidth: 200 },
         { field: "organization", headerName: "Org", width: 150 },
         { field: "department", headerName: "Dept", width: 150 },
@@ -139,6 +157,15 @@ export default function EmployeesPage() {
         "& .MuiDataGrid-cell": { borderColor: tokens.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)" },
     };
 
+    const headerSearchSx = {
+        minWidth: 180,
+        maxWidth: 220,
+        ml: 1,
+        "& .MuiOutlinedInput-root": {
+            bgcolor: "rgba(255, 255, 255, 0.05)",
+        },
+    };
+
     return (
         <Box sx={{ height: "calc(100vh - 120px)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <Box sx={{ mb: 3, flexShrink: 0 }}>
@@ -167,6 +194,13 @@ export default function EmployeesPage() {
                         >
                             {syncing ? t("employees.syncing") : t("employees.syncButton")}
                         </Button>
+                        <TextField
+                            size="small"
+                            placeholder={t("events.search")}
+                            value={turnstileSearch}
+                            onChange={(e) => setTurnstileSearch(e.target.value)}
+                            sx={headerSearchSx}
+                        />
                     </Box>
                     <DataGrid
                         rows={filteredEmployees}
@@ -194,9 +228,16 @@ export default function EmployeesPage() {
                         >
                             {esmoSyncing ? t("employees.esmoSyncing") : t("employees.esmoSyncButton")}
                         </Button>
+                        <TextField
+                            size="small"
+                            placeholder={t("events.search")}
+                            value={esmoSearch}
+                            onChange={(e) => setEsmoSearch(e.target.value)}
+                            sx={headerSearchSx}
+                        />
                     </Box>
                     <DataGrid
-                        rows={esmoEmployees}
+                        rows={filteredEsmoEmployees}
                         columns={esmoColumns}
                         loading={esmoLoading}
                         disableColumnSorting

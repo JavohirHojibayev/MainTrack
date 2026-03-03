@@ -26,7 +26,7 @@
         "title": "Dashboard",
         "insideMine": "Inside Mine",
         "esmoOkToday": "ESMO",
-        "toolDebts": "Tool Debts",
+        "toolDebts": "Lamp & self-rescuer",
         "blockedAttempts": "Blocked Attempts",
         "employee": "Employee",
         "name": "Name",
@@ -58,7 +58,7 @@
         "eventType": "Event Type",
         "status": "Status",
         "apply": "Apply",
-        "exportCsv": "Export CSV",
+        "exportCsv": "Export XLS",
         "exportPdf": "Export PDF",
         "generated": "Generated",
         "all": "All",
@@ -86,7 +86,7 @@
         "search": "Search",
         "searchHint": "Name or ID",
         "apply": "Apply",
-        "exportCsv": "Export CSV",
+        "exportCsv": "Export XLS",
         "exportPdf": "Export PDF",
         "col": {
             "name": "Name",
@@ -186,7 +186,7 @@
         "yesterday": "Yesterday",
         "thisWeek": "This Week",
         "thisMonth": "This Month",
-        "exportCsv": "Export CSV",
+        "exportCsv": "Export XLS",
         "exportPdf": "Export PDF",
         "dailySummary": "Daily Summary",
         "metric": "Metric",
@@ -210,17 +210,28 @@
         "search": "Search",
         "searchHint": "Name or ID",
         "apply": "Apply",
-        "exportCsv": "Export CSV",
+        "issueNow": "Issue",
+        "returnNow": "Return",
+        "exportCsv": "Export XLS",
         "exportPdf": "Export PDF",
         "col": {
             "employeeNo": "Employee #",
             "name": "Name",
             "turnstileTime": "Turnstile Time",
             "esmoTime": "ESMO Time",
+            "esmoStatus": "ESMO Status",
             "toolName": "Tool",
             "quantity": "Qty",
             "issuedAt": "Issued At",
+            "returnedAt": "Returned At",
+            "status": "Status",
             "issuer": "Issuer"
+        },
+        "status": {
+            "notIssued": "Not issued",
+            "issued": "Issued",
+            "done": "Done",
+            "fail": "fail"
         }
     },
     "topbar": {
@@ -248,8 +259,16 @@
         "noData": "-",
         "sync": "Synch",
         "cancel": "Cancel",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "clear": "Clear",
+        "today": "Today",
+        "datePlaceholder": "dd.mm.yyyy",
+        "dateTokenDay": "dd",
+        "dateTokenMonth": "mm",
+        "dateTokenYear": "yyyy"
     }
 }
+
+
 
 

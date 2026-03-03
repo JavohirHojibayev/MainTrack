@@ -1,20 +1,30 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import case, func
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db
 from app.core.rbac import require_roles
 from app.core.esmo_poller import get_allowed_esmo_terminal_names
-from app.models.device import Device
+from app.models.device import Device, DeviceType
 from app.models.employee import Employee
 from app.models.user import User
 from app.models.event import Event, EventStatus, EventType
 from app.models.medical_exam import MedicalExam
-from app.schemas.report import InsideMineItem, MineWorkSummaryItem, ToolDebtItem, ReportSummary, EsmoSummary24h
+from app.schemas.report import (
+    EsmoSummary24h,
+    InsideMineItem,
+    LampSelfActionIn,
+    LampSelfActionOut,
+    LampSelfStatusItem,
+    MineWorkSummaryItem,
+    ReportSummary,
+    ToolDebtItem,
+)
 
 router = APIRouter()
 
@@ -72,6 +82,105 @@ def _to_local_naive(dt: datetime) -> datetime:
         return dt
     tz_local = timezone(timedelta(hours=5))
     return dt.astimezone(tz_local).replace(tzinfo=None)
+
+
+def _normalize_esmo_result(result_raw: str | None) -> str:
+    value = (result_raw or "").strip().lower()
+    if value == "passed":
+        return "passed"
+    if value in {"review", "manual_review", "ko'rik", "korik"}:
+        return "review"
+    return "fail"
+
+
+def _normalize_numeric_employee_no(value: str | None) -> str:
+    raw = (value or "").strip()
+    if not raw.isdigit():
+        return raw
+    stripped = raw.lstrip("0")
+    return stripped or "0"
+
+
+def _format_employee_no(value: str | None, min_len: int = 8) -> str:
+    normalized = _normalize_numeric_employee_no(value)
+    if not normalized.isdigit():
+        return normalized
+    return normalized.zfill(min_len)
+
+
+def _latest_esmo_exam_today(db: Session, employee_id: int) -> MedicalExam | None:
+    today = _current_local_day()
+    start_local, end_local = _local_day_bounds(today)
+    start_naive = start_local.replace(tzinfo=None)
+    end_naive = end_local.replace(tzinfo=None)
+
+    return (
+        db.query(MedicalExam)
+        .filter(
+            MedicalExam.employee_id == employee_id,
+            MedicalExam.terminal_name.in_(get_allowed_esmo_terminal_names()),
+            MedicalExam.timestamp >= start_naive,
+            MedicalExam.timestamp < end_naive,
+        )
+        .order_by(MedicalExam.timestamp.desc(), MedicalExam.esmo_id.desc().nullslast(), MedicalExam.id.desc())
+        .first()
+    )
+
+
+def _last_tool_take_return(db: Session, employee_id: int) -> tuple[datetime | None, datetime | None]:
+    row = (
+        db.query(
+            func.max(case((and_(Event.event_type == EventType.TOOL_TAKE, Event.status == EventStatus.ACCEPTED), Event.event_ts), else_=None)).label("last_take"),
+            func.max(case((and_(Event.event_type == EventType.TOOL_RETURN, Event.status == EventStatus.ACCEPTED), Event.event_ts), else_=None)).label("last_return"),
+        )
+        .filter(Event.employee_id == employee_id)
+        .first()
+    )
+    if not row:
+        return None, None
+    return row[0], row[1]
+
+
+def _resolve_lamp_device(db: Session) -> Device:
+    preferred = (
+        db.query(Device)
+        .filter(Device.is_active.is_(True), Device.device_type == DeviceType.TOOL_FACE)
+        .order_by(Device.id.asc())
+        .first()
+    )
+    if preferred:
+        return preferred
+
+    named = (
+        db.query(Device)
+        .filter(
+            Device.is_active.is_(True),
+            (Device.name.ilike("%lamp%")) | (Device.name.ilike("%self%")) | (Device.device_code.ilike("%TOOL%")),
+        )
+        .order_by(Device.id.asc())
+        .first()
+    )
+    if named:
+        return named
+
+    manual = db.query(Device).filter(Device.device_code == "LAMP_SELF_MANUAL").first()
+    if manual:
+        if not manual.is_active:
+            manual.is_active = True
+            db.flush()
+        return manual
+
+    manual = Device(
+        name="Lamp & self-rescuer manual",
+        device_code="LAMP_SELF_MANUAL",
+        device_type=DeviceType.OTHER,
+        location="Warehouse",
+        api_key=f"lamp-self-{uuid4().hex}",
+        is_active=True,
+    )
+    db.add(manual)
+    db.flush()
+    return manual
 
 
 def _latest_esmo_result_counts(
@@ -260,6 +369,299 @@ def tool_debts(
             )
         )
     return result
+
+
+@router.get("/lamp-self-rescuer", response_model=list[LampSelfStatusItem])
+def lamp_self_rescuer_status(
+    start_date: date | None = Query(default=None, description="YYYY-MM-DD"),
+    end_date: date | None = Query(default=None, description="YYYY-MM-DD"),
+    search: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
+) -> list[LampSelfStatusItem]:
+    if start_date is None and end_date is None:
+        today = _current_local_day()
+        start_date = today
+        end_date = today
+    elif start_date is None:
+        start_date = end_date
+    elif end_date is None:
+        end_date = start_date
+
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    tz_local = timezone(timedelta(hours=5))
+    start_local = datetime(start_date.year, start_date.month, start_date.day, tzinfo=tz_local)
+    end_local = datetime(end_date.year, end_date.month, end_date.day, tzinfo=tz_local) + timedelta(days=1)
+
+    start_local_naive = start_local.replace(tzinfo=None)
+    end_local_naive = end_local.replace(tzinfo=None)
+
+    exam_rows = (
+        db.query(MedicalExam)
+        .filter(
+            MedicalExam.terminal_name.in_(get_allowed_esmo_terminal_names()),
+            MedicalExam.timestamp >= start_local_naive,
+            MedicalExam.timestamp < end_local_naive,
+        )
+        .order_by(MedicalExam.timestamp.desc(), MedicalExam.esmo_id.desc().nullslast(), MedicalExam.id.desc())
+        .all()
+    )
+
+    latest_exam_by_employee: dict[int, MedicalExam] = {}
+    for exam in exam_rows:
+        if exam.employee_id not in latest_exam_by_employee:
+            latest_exam_by_employee[exam.employee_id] = exam
+
+    if not latest_exam_by_employee:
+        return []
+
+    employee_ids = list(latest_exam_by_employee.keys())
+    employees = db.query(Employee).filter(Employee.id.in_(employee_ids)).all()
+    employees_by_id = {emp.id: emp for emp in employees}
+
+    turnstile_rows = (
+        db.query(Event.employee_id, func.max(Event.event_ts))
+        .filter(
+            Event.status == EventStatus.ACCEPTED,
+            Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]),
+            Event.employee_id.in_(employee_ids),
+            Event.event_ts >= start_local,
+            Event.event_ts < end_local,
+        )
+        .group_by(Event.employee_id)
+        .all()
+    )
+    turnstile_by_employee = {employee_id: ts for employee_id, ts in turnstile_rows}
+
+    tool_rows = (
+        db.query(
+            Event.employee_id,
+            Event.event_type,
+            Event.status,
+            Event.event_ts,
+            Event.reject_reason,
+            Event.source_payload,
+            Device.name,
+        )
+        .join(Device, Device.id == Event.device_id)
+        .filter(
+            Event.event_type.in_([EventType.TOOL_TAKE, EventType.TOOL_RETURN]),
+            Event.employee_id.in_(employee_ids),
+            Event.event_ts >= start_local,
+            Event.event_ts < end_local,
+        )
+        .order_by(Event.employee_id, Event.event_ts, Event.id)
+        .all()
+    )
+
+    last_take_by_employee: dict[int, datetime] = {}
+    last_return_by_employee: dict[int, datetime] = {}
+    last_rejected_take_by_employee: dict[int, datetime] = {}
+    issuer_by_employee: dict[int, str] = {}
+    for employee_id, event_type, event_status, event_ts, reject_reason, source_payload, device_name in tool_rows:
+        if event_type == EventType.TOOL_TAKE and event_status == EventStatus.ACCEPTED:
+            last_take_by_employee[employee_id] = event_ts
+            actor_login = ""
+            source_name = ""
+            if isinstance(source_payload, dict):
+                actor_login = str(
+                    source_payload.get("actor_login")
+                    or source_payload.get("issuer")
+                    or source_payload.get("username")
+                    or ""
+                ).strip()
+                source_name = str(source_payload.get("source") or "").strip().lower()
+            if not actor_login and source_name == "ui":
+                actor_login = "admin"
+            issuer_by_employee[employee_id] = actor_login or (device_name or "").strip() or "System"
+        elif event_type == EventType.TOOL_TAKE and event_status == EventStatus.REJECTED:
+            reason = (reject_reason or "").strip().lower()
+            if "already issued" in reason or "not returned" in reason:
+                last_rejected_take_by_employee[employee_id] = event_ts
+        elif event_type == EventType.TOOL_RETURN and event_status == EventStatus.ACCEPTED:
+            last_return_by_employee[employee_id] = event_ts
+
+    search_terms = [part.strip().lower() for part in (search or "").split() if part.strip()]
+
+    result: list[LampSelfStatusItem] = []
+    for employee_id, exam in sorted(
+        latest_exam_by_employee.items(),
+        key=lambda item: (item[1].timestamp, item[1].esmo_id or 0, item[1].id),
+        reverse=True,
+    ):
+        employee = employees_by_id.get(employee_id)
+        if employee is None:
+            continue
+
+        full_name = f"{employee.last_name} {employee.first_name} {employee.patronymic or ''}".strip()
+        employee_no_raw = (employee.employee_no or "").strip()
+        employee_no_haystack = employee_no_raw
+        if employee_no_raw.isdigit():
+            employee_no_haystack = f"{employee_no_raw} {_normalize_numeric_employee_no(employee_no_raw)} {_format_employee_no(employee_no_raw)}"
+        haystack = f"{employee_no_haystack} {full_name}".lower()
+        if search_terms and not all(term in haystack for term in search_terms):
+            continue
+
+        esmo_status = _normalize_esmo_result(exam.result)
+        issued_at = last_take_by_employee.get(employee_id)
+        returned_at = last_return_by_employee.get(employee_id)
+        last_rejected_take = last_rejected_take_by_employee.get(employee_id)
+
+        active_issue = bool(issued_at and (returned_at is None or issued_at > returned_at))
+        if active_issue and last_rejected_take and issued_at and last_rejected_take >= issued_at:
+            status = "FAIL"
+            quantity = 1
+        elif active_issue:
+            status = "ISSUED"
+            quantity = 1
+        elif issued_at and returned_at and returned_at >= issued_at:
+            status = "DONE"
+            quantity = 0
+        else:
+            status = "NOT_ISSUED"
+            quantity = 0
+
+        result.append(
+            LampSelfStatusItem(
+                employee_id=employee.id,
+                employee_no=employee.employee_no,
+                full_name=full_name,
+                turnstile_time=turnstile_by_employee.get(employee_id),
+                esmo_time=exam.timestamp,
+                esmo_status=esmo_status,
+                tool_name="Lamp & self-rescuer",
+                quantity=quantity,
+                issued_at=issued_at,
+                returned_at=returned_at,
+                issuer=issuer_by_employee.get(employee_id),
+                status=status,
+            )
+        )
+
+    return result
+
+
+@router.post("/lamp-self-rescuer/issue", response_model=LampSelfActionOut)
+def issue_lamp_self_rescuer(
+    payload: LampSelfActionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("superadmin", "admin", "dispatcher", "warehouse")),
+) -> LampSelfActionOut:
+    employee = db.query(Employee).filter(Employee.id == payload.employee_id).first()
+    if employee is None:
+        return LampSelfActionOut(success=False, status="FAIL", message="Employee not found")
+
+    latest_exam = _latest_esmo_exam_today(db, employee.id)
+    if latest_exam is None:
+        return LampSelfActionOut(success=False, status="FAIL", message="No ESMO exam today")
+
+    latest_result = _normalize_esmo_result(latest_exam.result)
+    if latest_result not in {"passed", "review"}:
+        return LampSelfActionOut(success=False, status="FAIL", message="Latest ESMO status is not passed")
+
+    last_take, last_return = _last_tool_take_return(db, employee.id)
+    has_active_issue = bool(last_take and (last_return is None or last_take > last_return))
+    tool_device = _resolve_lamp_device(db)
+    now_ts = datetime.now(timezone(timedelta(hours=5)))
+
+    if has_active_issue:
+        rejected = Event(
+            device_id=tool_device.id,
+            employee_id=employee.id,
+            event_type=EventType.TOOL_TAKE,
+            event_ts=now_ts,
+            raw_id=f"ui-tool-take-reject:{uuid4().hex}",
+            status=EventStatus.REJECTED,
+            reject_reason="Already issued (not returned)",
+            source_payload={
+                "source": "ui",
+                "action": "issue",
+                "scope": "lamp_self",
+                "actor_login": current_user.username,
+            },
+        )
+        db.add(rejected)
+        db.commit()
+        db.refresh(rejected)
+        return LampSelfActionOut(
+            success=False,
+            status="FAIL",
+            message="Already issued, return first",
+            event_id=rejected.id,
+            event_ts=rejected.event_ts,
+        )
+
+    accepted = Event(
+        device_id=tool_device.id,
+        employee_id=employee.id,
+        event_type=EventType.TOOL_TAKE,
+        event_ts=now_ts,
+        raw_id=f"ui-tool-take:{uuid4().hex}",
+        status=EventStatus.ACCEPTED,
+        reject_reason=None,
+        source_payload={
+            "source": "ui",
+            "action": "issue",
+            "scope": "lamp_self",
+            "actor_login": current_user.username,
+        },
+    )
+    db.add(accepted)
+    db.commit()
+    db.refresh(accepted)
+    return LampSelfActionOut(
+        success=True,
+        status="ISSUED",
+        message="Issued successfully",
+        event_id=accepted.id,
+        event_ts=accepted.event_ts,
+    )
+
+
+@router.post("/lamp-self-rescuer/return", response_model=LampSelfActionOut)
+def return_lamp_self_rescuer(
+    payload: LampSelfActionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("superadmin", "admin", "dispatcher", "warehouse")),
+) -> LampSelfActionOut:
+    employee = db.query(Employee).filter(Employee.id == payload.employee_id).first()
+    if employee is None:
+        return LampSelfActionOut(success=False, status="FAIL", message="Employee not found")
+
+    last_take, last_return = _last_tool_take_return(db, employee.id)
+    has_active_issue = bool(last_take and (last_return is None or last_take > last_return))
+    if not has_active_issue:
+        return LampSelfActionOut(success=False, status="NOT_ISSUED", message="No active issue")
+
+    tool_device = _resolve_lamp_device(db)
+    now_ts = datetime.now(timezone(timedelta(hours=5)))
+    accepted = Event(
+        device_id=tool_device.id,
+        employee_id=employee.id,
+        event_type=EventType.TOOL_RETURN,
+        event_ts=now_ts,
+        raw_id=f"ui-tool-return:{uuid4().hex}",
+        status=EventStatus.ACCEPTED,
+        reject_reason=None,
+        source_payload={
+            "source": "ui",
+            "action": "return",
+            "scope": "lamp_self",
+            "actor_login": current_user.username,
+        },
+    )
+    db.add(accepted)
+    db.commit()
+    db.refresh(accepted)
+    return LampSelfActionOut(
+        success=True,
+        status="DONE",
+        message="Returned successfully",
+        event_id=accepted.id,
+        event_ts=accepted.event_ts,
+    )
 
 
 @router.get("/daily-mine-summary", response_model=list[MineWorkSummaryItem])

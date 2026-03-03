@@ -47,3 +47,30 @@ class EsmoSummary24h(BaseModel):
     failed: int
     review: int
     total: int
+
+
+class LampSelfStatusItem(BaseModel):
+    employee_id: int
+    employee_no: str
+    full_name: str
+    turnstile_time: datetime | None
+    esmo_time: datetime | None
+    esmo_status: str
+    tool_name: str
+    quantity: int
+    issued_at: datetime | None
+    returned_at: datetime | None
+    issuer: str | None
+    status: str
+
+
+class LampSelfActionIn(BaseModel):
+    employee_id: int
+
+
+class LampSelfActionOut(BaseModel):
+    success: bool
+    status: str
+    message: str
+    event_id: int | None = None
+    event_ts: datetime | None = None

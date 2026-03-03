@@ -6,9 +6,12 @@ import CloseIcon from "@mui/icons-material/CloseRounded";
 import DownloadIcon from "@mui/icons-material/DownloadRounded";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfRounded";
 import GlassCard from "@/components/GlassCard";
+import LocalizedDateInput from "@/components/LocalizedDateInput";
 import StatusPill from "@/components/StatusPill";
 import { fetchEvents, fetchEventsPaged, type EventRow, type EventFilters } from "@/api/events";
 import { useAppTheme } from "@/context/ThemeContext";
+import { downloadXls } from "@/utils/exportXls";
+import { formatEmployeeNo } from "@/utils/employeeNo";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -59,6 +62,13 @@ export default function TurnstileJournalPage() {
 
     const columns: GridColDef[] = [
         {
+            field: "employee_no",
+            headerName: t("events.col.employeeNo") || "Employee #",
+            width: 160,
+            hideable: false,
+            valueGetter: (value) => formatEmployeeNo(value),
+        },
+        {
             field: "full_name",
             headerName: t("events.col.name") || "Name",
             width: 300,
@@ -68,7 +78,6 @@ export default function TurnstileJournalPage() {
                 return parts.join(" ");
             }
         },
-        { field: "employee_no", headerName: t("events.col.employeeNo") || "Employee #", width: 160, hideable: false },
         { field: "event_ts", headerName: t("events.col.time"), width: 220, hideable: false, valueFormatter: (p) => { try { return new Date(p as string).toLocaleString("en-GB"); } catch { return p as string; } } },
         {
             field: "device_name",
@@ -102,19 +111,24 @@ export default function TurnstileJournalPage() {
     const getFullName = (row: EventRow) => [row.last_name, row.first_name, row.patronymic].filter(Boolean).join(" ");
     const formatTime = (ts: string) => { try { return new Date(ts).toLocaleString("en-GB"); } catch { return ts; } };
 
-    const exportCSV = async () => {
+    const exportXLS = async () => {
         const fullRows = dedupeRows(await fetchEvents({ ...filters, turnstile_only: true, limit: 10000 }));
         if (fullRows.length === 0) return;
-        const header = `${t("events.col.name")};${t("events.col.employeeNo")};${t("events.col.time")};${t("events.col.deviceId")};${t("events.col.status")}\n`;
-        const csvRows = fullRows.map(r =>
-            `"${getFullName(r)}";"${r.employee_no || ""}";"${formatTime(r.event_ts)}";"${getTurnstileDeviceName(r)}";"${r.status}"`
-        ).join("\n");
-        const blob = new Blob(["\uFEFF" + header + csvRows], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `turnstile_journal_${new Date().toISOString().split('T')[0]}.csv`);
-        link.click();
+        const headers = [
+            t("events.col.name"),
+            t("events.col.employeeNo"),
+            t("events.col.time"),
+            t("events.col.deviceId"),
+            t("events.col.status"),
+        ];
+        const dataRows = fullRows.map((r) => [
+            getFullName(r),
+            formatEmployeeNo(r.employee_no || ""),
+            formatTime(r.event_ts),
+            getTurnstileDeviceName(r),
+            r.status,
+        ]);
+        downloadXls(headers, dataRows, `turnstile_journal_${new Date().toISOString().split("T")[0]}.xls`);
     };
 
     const exportPDF = async () => {
@@ -143,7 +157,7 @@ export default function TurnstileJournalPage() {
 
         const tableData = fullRows.map(r => [
             getFullName(r),
-            r.employee_no || "",
+            formatEmployeeNo(r.employee_no || ""),
             formatTime(r.event_ts),
             getTurnstileDeviceName(r),
             r.status,
@@ -196,9 +210,17 @@ export default function TurnstileJournalPage() {
                 <Box component="span" sx={pageTitleGradientSx}>{t("events.title")}</Box>
             </Typography>
             <Box sx={{ mb: 4, display: "flex", gap: 2, alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
-                <TextField label={t("events.dateFrom")} type="date" InputLabelProps={{ shrink: true }} sx={{ minWidth: 160 }} onChange={(e) => setFilters((f) => ({ ...f, date_from: e.target.value ? new Date(e.target.value).toISOString() : undefined }))} />
-                <TextField label={t("events.dateTo")} type="date" InputLabelProps={{ shrink: true }} sx={{ minWidth: 160 }} onChange={(e) => setFilters((f) => ({ ...f, date_to: e.target.value ? new Date(e.target.value + "T23:59:59").toISOString() : undefined }))} />
-                <TextField label={t("events.search")} placeholder={t("events.searchHint")} sx={{ minWidth: 200 }} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value || undefined }))} />
+                <LocalizedDateInput
+                    label={t("events.dateFrom")}
+                    value={filters.date_from ? new Date(filters.date_from).toISOString().slice(0, 10) : ""}
+                    onChange={(next) => setFilters((f) => ({ ...f, date_from: next ? new Date(next).toISOString() : undefined }))}
+                />
+                <LocalizedDateInput
+                    label={t("events.dateTo")}
+                    value={filters.date_to ? new Date(filters.date_to).toISOString().slice(0, 10) : ""}
+                    onChange={(next) => setFilters((f) => ({ ...f, date_to: next ? new Date(next + "T23:59:59").toISOString() : undefined }))}
+                />
+                <TextField label={t("events.search")} placeholder={t("events.searchHint")} sx={{ minWidth: 160 }} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value || undefined }))} />
                 <Button
                     variant="contained"
                     onClick={() => {
@@ -213,7 +235,7 @@ export default function TurnstileJournalPage() {
                 <Button
                     variant="contained"
                     startIcon={<DownloadIcon />}
-                    onClick={exportCSV}
+                    onClick={exportXLS}
                     disabled={rows.length === 0 || loading}
                     sx={{ height: 40, borderRadius: "50px", textTransform: "none", fontWeight: "bold", whiteSpace: "nowrap", background: "linear-gradient(135deg, #06b6d4, #3b82f6)", "&:hover": { background: "linear-gradient(135deg, #0891b2, #2563eb)" } }}
                 >

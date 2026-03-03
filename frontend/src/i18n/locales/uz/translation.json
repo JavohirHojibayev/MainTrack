@@ -26,7 +26,7 @@
         "title": "Boshqaruv paneli",
         "insideMine": "Konda",
         "esmoOkToday": "ESMO",
-        "toolDebts": "Asbob qarzlari",
+        "toolDebts": "Lampa & samospasatel",
         "blockedAttempts": "Bloklangan",
         "employee": "Xodim",
         "name": "F.I.O.",
@@ -58,7 +58,7 @@
         "eventType": "Hodisa turi",
         "status": "Holat",
         "apply": "Qo'llash",
-        "exportCsv": "CSV yuklash",
+        "exportCsv": "XLS yuklash",
         "exportPdf": "PDF yuklash",
         "generated": "Yaratilgan",
         "all": "Hammasi",
@@ -86,7 +86,7 @@
         "search": "Qidirish",
         "searchHint": "Ism yoki ID",
         "apply": "Qo'llash",
-        "exportCsv": "CSV yuklash",
+        "exportCsv": "XLS yuklash",
         "exportPdf": "PDF yuklash",
         "col": {
             "name": "Ism",
@@ -165,7 +165,7 @@
         "yesterday": "Kecha",
         "thisWeek": "Shu hafta",
         "thisMonth": "Shu oy",
-        "exportCsv": "CSV yuklab olish",
+        "exportCsv": "XLS yuklab olish",
         "exportPdf": "PDF yuklab olish",
         "dailySummary": "Kunlik xulosa",
         "metric": "Ko'rsatkich",
@@ -189,17 +189,28 @@
         "search": "Qidirish",
         "searchHint": "Ism yoki ID",
         "apply": "Qo'llash",
-        "exportCsv": "CSV yuklash",
+        "issueNow": "Berish",
+        "returnNow": "Qaytarish",
+        "exportCsv": "XLS yuklash",
         "exportPdf": "PDF yuklash",
         "col": {
             "employeeNo": "Tabel #",
             "name": "F.I.O.",
             "turnstileTime": "Turniket vaqti",
             "esmoTime": "ESMO vaqti",
+            "esmoStatus": "ESMO holati",
             "toolName": "Asbob",
             "quantity": "Soni",
             "issuedAt": "Berilgan vaqt",
+            "returnedAt": "Qaytarilgan vaqt",
+            "status": "Holat",
             "issuer": "Kim berdi"
+        },
+        "status": {
+            "notIssued": "Berilmagan",
+            "issued": "Berilgan",
+            "done": "Done",
+            "fail": "fail"
         }
     },
     "adminUsers": {
@@ -237,9 +248,17 @@
         "noData": "-",
         "sync": "Sinx",
         "cancel": "Bekor qilish",
-        "confirm": "Tasdiqlash"
+        "confirm": "Tasdiqlash",
+        "clear": "Tozalash",
+        "today": "Bugun",
+        "datePlaceholder": "kk.oo.yyyy",
+        "dateTokenDay": "kk",
+        "dateTokenMonth": "oo",
+        "dateTokenYear": "yyyy"
     }
 }
+
+
 
 
 

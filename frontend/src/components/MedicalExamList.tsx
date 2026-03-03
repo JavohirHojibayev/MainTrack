@@ -16,6 +16,7 @@ import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { fetchMedicalExams, type MedicalExam } from "@/api/medical";
 import { useAppTheme } from "@/context/ThemeContext";
+import { employeeNoSearchHaystack } from "@/utils/employeeNo";
 
 interface MedicalExamListProps {
     searchQuery?: string;
@@ -118,7 +119,7 @@ export const MedicalExamList: React.FC<MedicalExamListProps> = ({ searchQuery = 
         return exams.filter((exam) => {
             const fullName = buildEmployeeName(exam);
             const employeeNo = exam.employee?.employee_no || "";
-            const haystack = `${fullName} ${employeeNo}`.toLowerCase();
+            const haystack = `${fullName} ${employeeNoSearchHaystack(employeeNo)}`.toLowerCase();
             return terms.every((term) => haystack.includes(term));
         });
     }, [exams, searchQuery]);

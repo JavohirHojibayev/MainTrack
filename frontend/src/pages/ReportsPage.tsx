@@ -24,7 +24,9 @@ import SensorDoorIcon from "@mui/icons-material/SensorDoorRounded";
 import NoMeetingRoomIcon from "@mui/icons-material/NoMeetingRoomRounded";
 import BlockIcon from "@mui/icons-material/BlockRounded";
 import GlassCard from "@/components/GlassCard";
+import LocalizedDateInput from "@/components/LocalizedDateInput";
 import { useAppTheme } from "@/context/ThemeContext";
+import { downloadXls } from "@/utils/exportXls";
 import { fetchReportSummary, type ReportSummary } from "@/api/reports";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -113,19 +115,14 @@ export default function ReportsPage() {
         });
     };
 
-    const exportCSV = () => {
+    const exportXLS = () => {
         if (!data || filteredSummaryData.length === 0) return;
-        let csv = `${t("reports.metric")},${t("reports.count")}\n`;
-        filteredSummaryData.forEach((row) => {
-            const val = data[row.key as keyof ReportSummary];
-            csv += `${getMetricLabel(row)},${val}\n`;
-        });
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `reports_${new Date().toISOString().split("T")[0]}.csv`);
-        link.click();
+        const headers = [t("reports.metric"), t("reports.count")];
+        const dataRows = filteredSummaryData.map((row) => [
+            getMetricLabel(row),
+            data[row.key as keyof ReportSummary],
+        ]);
+        downloadXls(headers, dataRows, `reports_${new Date().toISOString().split("T")[0]}.xls`);
     };
 
     const exportPDF = () => {
@@ -175,21 +172,15 @@ export default function ReportsPage() {
             </Typography>
 
             <Box sx={{ mb: 4, display: "flex", gap: 2, alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
-                <TextField
+                <LocalizedDateInput
                     label={t("esmo.dateFrom")}
-                    type="date"
                     value={filters.start_date}
-                    onChange={(e) => setFilters((f) => ({ ...f, start_date: e.target.value }))}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ minWidth: 160 }}
+                    onChange={(next) => setFilters((f) => ({ ...f, start_date: next }))}
                 />
-                <TextField
+                <LocalizedDateInput
                     label={t("esmo.dateTo")}
-                    type="date"
                     value={filters.end_date}
-                    onChange={(e) => setFilters((f) => ({ ...f, end_date: e.target.value }))}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ minWidth: 160 }}
+                    onChange={(next) => setFilters((f) => ({ ...f, end_date: next }))}
                 />
                 <TextField
                     label={t("esmo.search")}
@@ -199,7 +190,7 @@ export default function ReportsPage() {
                     onKeyDown={(e) => {
                         if (e.key === "Enter") handleApply();
                     }}
-                    sx={{ minWidth: 200 }}
+                    sx={{ minWidth: 160 }}
                 />
                 <Button
                     variant="contained"
@@ -211,7 +202,7 @@ export default function ReportsPage() {
                 <Button
                     variant="contained"
                     startIcon={<DownloadIcon />}
-                    onClick={exportCSV}
+                    onClick={exportXLS}
                     disabled={!data || loading || filteredSummaryData.length === 0}
                     sx={{ height: 40, borderRadius: "50px", textTransform: "none", fontWeight: "bold", whiteSpace: "nowrap", background: "linear-gradient(135deg, #06b6d4, #3b82f6)", "&:hover": { background: "linear-gradient(135deg, #0891b2, #2563eb)" } }}
                 >

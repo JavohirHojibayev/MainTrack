@@ -186,7 +186,7 @@ export default function AdminUsersPage() {
                     </Table>
                 </GlassCard>
 
-                <Box sx={{ mt: 2, display: "flex", justifyContent: "flex-end" }}>
+                <Box sx={{ mt: 2, display: "flex", justifyContent: "flex-start" }}>
                     <Button
                         variant="contained" startIcon={<AddIcon />}
                         onClick={() => setCreateOpen(true)}

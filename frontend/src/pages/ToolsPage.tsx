@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Box, Typography, TextField, Button } from "@mui/material";
+import { Box, Typography, TextField, Button, CircularProgress } from "@mui/material";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 import DownloadIcon from "@mui/icons-material/DownloadRounded";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfRounded";
 import GlassCard from "@/components/GlassCard";
+import LocalizedDateInput from "@/components/LocalizedDateInput";
+import StatusPill from "@/components/StatusPill";
 import { useAppTheme } from "@/context/ThemeContext";
+import { downloadXls } from "@/utils/exportXls";
+import { fetchLampSelfRows, issueLampSelf, returnLampSelf, type LampSelfRow } from "@/api/tools";
+import { formatEmployeeNo } from "@/utils/employeeNo";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -25,16 +30,8 @@ type ToolsFilters = {
     search: string;
 };
 
-type ToolIssueRow = {
+type ToolIssueRow = LampSelfRow & {
     id: string;
-    employee_no: string;
-    full_name: string;
-    turnstile_time: string;
-    esmo_time: string;
-    tool_name: string;
-    quantity: number;
-    issued_at: string;
-    issuer: string;
 };
 
 export default function ToolsPage() {
@@ -52,14 +49,60 @@ export default function ToolsPage() {
         end_date: "",
         search: "",
     });
+    const [actionLoading, setActionLoading] = useState<Record<number, "issue" | "return" | undefined>>({});
+
+    const formatDateTime = (value: string | null | undefined): string => {
+        if (!value) return "-";
+        const parsed = dayjs(value);
+        return parsed.isValid() ? parsed.format("DD.MM.YYYY HH:mm") : "-";
+    };
+
+    const formatStatus = (value: string | null | undefined): string => {
+        if (value === "ISSUED") return t("tools.status.issued");
+        if (value === "DONE") return t("tools.status.done");
+        if (value === "FAIL") return t("tools.status.fail");
+        return t("tools.status.notIssued");
+    };
+
+    const formatEsmoStatus = (value: string | null | undefined): string => {
+        if (value === "passed") return t("status.passed");
+        if (value === "review") return t("status.review");
+        return t("status.failed");
+    };
+
+    const esmoStatusColor = (value: string | null | undefined): string => {
+        if (value === "passed") return "OK";
+        if (value === "review") return "WARNING";
+        return "FAIL";
+    };
+
+    const isActiveIssue = (row: ToolIssueRow): boolean => {
+        if (!row.issued_at) return false;
+        if (!row.returned_at) return true;
+        const issued = dayjs(row.issued_at);
+        const returned = dayjs(row.returned_at);
+        if (!issued.isValid()) return false;
+        if (!returned.isValid()) return true;
+        return issued.isAfter(returned);
+    };
 
     const loadRows = async () => {
         setLoading(true);
         try {
-            // Placeholder: backend integration will be added in next stage.
-            setRows([]);
+            const data = await fetchLampSelfRows({
+                start_date: appliedFilters.start_date,
+                end_date: appliedFilters.end_date,
+                search: appliedFilters.search,
+            });
+            setRows(
+                data.map((row) => ({
+                    ...row,
+                    id: `${row.employee_id}-${row.employee_no}`,
+                }))
+            );
         } catch (err) {
             console.error("Failed to load tools rows", err);
+            setRows([]);
         } finally {
             setLoading(false);
         }
@@ -77,20 +120,54 @@ export default function ToolsPage() {
         });
     };
 
-    const exportCSV = () => {
-        const header = `${t("tools.col.employeeNo")};${t("tools.col.name")};${t("tools.col.turnstileTime")};${t("tools.col.esmoTime")};${t("tools.col.toolName")};${t("tools.col.quantity")};${t("tools.col.issuedAt")};${t("tools.col.issuer")}\n`;
-        const csvRows = rows
-            .map((r) =>
-                `"${r.employee_no}";"${r.full_name}";"${r.turnstile_time ? dayjs(r.turnstile_time).format("DD.MM.YYYY HH:mm") : "-"}";"${r.esmo_time ? dayjs(r.esmo_time).format("DD.MM.YYYY HH:mm") : "-"}";"${r.tool_name}";"${r.quantity}";"${r.issued_at ? dayjs(r.issued_at).format("DD.MM.YYYY HH:mm") : "-"}";"${r.issuer}"`
-            )
-            .join("\n");
+    const handleIssue = async (row: ToolIssueRow) => {
+        setActionLoading((prev) => ({ ...prev, [row.employee_id]: "issue" }));
+        try {
+            await issueLampSelf(row.employee_id);
+            await loadRows();
+        } catch (err) {
+            console.error("Failed to issue lamp/self-rescuer", err);
+        } finally {
+            setActionLoading((prev) => ({ ...prev, [row.employee_id]: undefined }));
+        }
+    };
 
-        const blob = new Blob(["\uFEFF" + header + csvRows], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `tools_${new Date().toISOString().split("T")[0]}.csv`);
-        link.click();
+    const handleReturn = async (row: ToolIssueRow) => {
+        setActionLoading((prev) => ({ ...prev, [row.employee_id]: "return" }));
+        try {
+            await returnLampSelf(row.employee_id);
+            await loadRows();
+        } catch (err) {
+            console.error("Failed to return lamp/self-rescuer", err);
+        } finally {
+            setActionLoading((prev) => ({ ...prev, [row.employee_id]: undefined }));
+        }
+    };
+
+    const exportXLS = () => {
+        const headers = [
+            t("tools.col.employeeNo"),
+            t("tools.col.name"),
+            t("tools.col.turnstileTime"),
+            t("tools.col.esmoTime"),
+            t("tools.col.esmoStatus"),
+            t("tools.col.issuedAt"),
+            t("tools.col.returnedAt"),
+            t("tools.col.status"),
+            t("tools.col.issuer"),
+        ];
+        const dataRows = rows.map((r) => [
+            formatEmployeeNo(r.employee_no),
+            r.full_name,
+            formatDateTime(r.turnstile_time),
+            formatDateTime(r.esmo_time),
+            formatEsmoStatus(r.esmo_status),
+            formatDateTime(r.issued_at),
+            formatDateTime(r.returned_at),
+            formatStatus(r.status),
+            r.issuer || "-",
+        ]);
+        downloadXls(headers, dataRows, `lamp_self_${new Date().toISOString().split("T")[0]}.xls`);
     };
 
     const exportPDF = () => {
@@ -103,14 +180,15 @@ export default function ToolsPage() {
         doc.text(`${t("events.generated")}: ${new Date().toLocaleString()}`, 14, 25);
 
         const tableData = rows.map((r) => [
-            r.employee_no,
+            formatEmployeeNo(r.employee_no),
             r.full_name,
-            r.turnstile_time ? dayjs(r.turnstile_time).format("DD.MM.YYYY HH:mm") : "-",
-            r.esmo_time ? dayjs(r.esmo_time).format("DD.MM.YYYY HH:mm") : "-",
-            r.tool_name,
-            String(r.quantity),
-            r.issued_at ? dayjs(r.issued_at).format("DD.MM.YYYY HH:mm") : "-",
-            r.issuer,
+            formatDateTime(r.turnstile_time),
+            formatDateTime(r.esmo_time),
+            formatEsmoStatus(r.esmo_status),
+            formatDateTime(r.issued_at),
+            formatDateTime(r.returned_at),
+            formatStatus(r.status),
+            r.issuer || "-",
         ]);
 
         autoTable(doc, {
@@ -119,9 +197,10 @@ export default function ToolsPage() {
                 t("tools.col.name"),
                 t("tools.col.turnstileTime"),
                 t("tools.col.esmoTime"),
-                t("tools.col.toolName"),
-                t("tools.col.quantity"),
+                t("tools.col.esmoStatus"),
                 t("tools.col.issuedAt"),
+                t("tools.col.returnedAt"),
+                t("tools.col.status"),
                 t("tools.col.issuer"),
             ]],
             body: tableData,
@@ -131,35 +210,140 @@ export default function ToolsPage() {
             styles: { fontSize: 9 },
         });
 
-        doc.save(`tools_${new Date().toISOString().split("T")[0]}.pdf`);
+        doc.save(`lamp_self_${new Date().toISOString().split("T")[0]}.pdf`);
     };
 
     const columns: GridColDef<ToolIssueRow>[] = useMemo(
         () => [
-            { field: "full_name", headerName: t("tools.col.name"), width: 420, minWidth: 420 },
+            {
+                field: "employee_no",
+                headerName: t("tools.col.employeeNo"),
+                width: 130,
+                minWidth: 130,
+                valueGetter: (value) => formatEmployeeNo(value),
+            },
+            { field: "full_name", headerName: t("tools.col.name"), width: 320, minWidth: 320 },
             {
                 field: "turnstile_time",
                 headerName: t("tools.col.turnstileTime"),
-                width: 180,
-                valueFormatter: (value) => (value ? dayjs(value as string).format("DD.MM.YYYY HH:mm") : "-"),
+                width: 170,
+                valueFormatter: (value) => formatDateTime(value as string | null),
             },
             {
                 field: "esmo_time",
                 headerName: t("tools.col.esmoTime"),
-                width: 180,
-                valueFormatter: (value) => (value ? dayjs(value as string).format("DD.MM.YYYY HH:mm") : "-"),
+                width: 170,
+                valueFormatter: (value) => formatDateTime(value as string | null),
             },
-            { field: "tool_name", headerName: t("tools.col.toolName"), width: 180 },
-            { field: "quantity", headerName: t("tools.col.quantity"), width: 100 },
+            {
+                field: "esmo_status",
+                headerName: t("tools.col.esmoStatus"),
+                width: 140,
+                renderCell: (params) => (
+                    <StatusPill
+                        status={formatEsmoStatus(params.value as string | null)}
+                        colorStatus={esmoStatusColor(params.value as string | null)}
+                    />
+                ),
+            },
             {
                 field: "issued_at",
                 headerName: t("tools.col.issuedAt"),
-                width: 180,
-                valueFormatter: (value) => (value ? dayjs(value as string).format("DD.MM.YYYY HH:mm") : "-"),
+                width: 170,
+                renderCell: (params) => {
+                    const row = params.row as ToolIssueRow;
+                    const loadingAction = actionLoading[row.employee_id] === "issue";
+                    const isEsmoEligible = row.esmo_status === "passed" || row.esmo_status === "review";
+                    if (row.issued_at) return formatDateTime(row.issued_at);
+                    if (!isEsmoEligible) return "-";
+                    return (
+                        <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => handleIssue(row)}
+                            disabled={loadingAction}
+                            sx={{ textTransform: "none", minWidth: 92 }}
+                        >
+                            {loadingAction ? <CircularProgress size={14} /> : t("tools.issueNow")}
+                        </Button>
+                    );
+                },
             },
-            { field: "issuer", headerName: t("tools.col.issuer"), width: 180 },
+            {
+                field: "returned_at",
+                headerName: t("tools.col.returnedAt"),
+                width: 170,
+                renderCell: (params) => {
+                    const row = params.row as ToolIssueRow;
+                    const active = isActiveIssue(row);
+                    const loadingAction = actionLoading[row.employee_id] === "return";
+                    if (!active && row.returned_at) return formatDateTime(row.returned_at);
+                    if (!active) return "-";
+                    return (
+                        <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => handleReturn(row)}
+                            disabled={loadingAction}
+                            sx={{ textTransform: "none", minWidth: 92 }}
+                        >
+                            {loadingAction ? <CircularProgress size={14} /> : t("tools.returnNow")}
+                        </Button>
+                    );
+                },
+            },
+            {
+                field: "status",
+                headerName: t("tools.col.status"),
+                width: 130,
+                renderCell: (params) => {
+                    const raw = String(params.value ?? "");
+                    const centeredSx = { display: "flex", alignItems: "center", height: "100%", width: "100%" };
+                    if (raw === "NOT_ISSUED") {
+                        return (
+                            <Box sx={centeredSx}>
+                                <Typography variant="body2" sx={{ color: tokens.text.secondary }}>
+                                    {formatStatus(raw)}
+                                </Typography>
+                            </Box>
+                        );
+                    }
+                    if (raw === "ISSUED") {
+                        return (
+                            <Box sx={centeredSx}>
+                                <StatusPill status={formatStatus(raw)} colorStatus="WARNING" />
+                            </Box>
+                        );
+                    }
+                    if (raw === "DONE") {
+                        return (
+                            <Box sx={centeredSx}>
+                                <StatusPill status={formatStatus(raw)} colorStatus="OK" />
+                            </Box>
+                        );
+                    }
+                    if (raw === "FAIL") {
+                        return (
+                            <Box sx={centeredSx}>
+                                <StatusPill status={formatStatus(raw)} colorStatus="FAIL" />
+                            </Box>
+                        );
+                    }
+                    return (
+                        <Box sx={centeredSx}>
+                            <Typography variant="body2">{formatStatus(raw)}</Typography>
+                        </Box>
+                    );
+                },
+            },
+            {
+                field: "issuer",
+                headerName: t("tools.col.issuer"),
+                width: 160,
+                valueFormatter: (value) => ((value as string | null) || "-"),
+            },
         ],
-        [t]
+        [actionLoading, t, tokens.text.secondary]
     );
 
     return (
@@ -169,21 +353,15 @@ export default function ToolsPage() {
             </Typography>
 
             <Box sx={{ mb: 4, display: "flex", gap: 2, alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
-                <TextField
+                <LocalizedDateInput
                     label={t("tools.dateFrom")}
-                    type="date"
                     value={filters.start_date}
-                    onChange={(e) => setFilters((f) => ({ ...f, start_date: e.target.value }))}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ minWidth: 160 }}
+                    onChange={(next) => setFilters((f) => ({ ...f, start_date: next }))}
                 />
-                <TextField
+                <LocalizedDateInput
                     label={t("tools.dateTo")}
-                    type="date"
                     value={filters.end_date}
-                    onChange={(e) => setFilters((f) => ({ ...f, end_date: e.target.value }))}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ minWidth: 160 }}
+                    onChange={(next) => setFilters((f) => ({ ...f, end_date: next }))}
                 />
                 <TextField
                     label={t("tools.search")}
@@ -193,7 +371,7 @@ export default function ToolsPage() {
                     onKeyDown={(e) => {
                         if (e.key === "Enter") handleApply();
                     }}
-                    sx={{ minWidth: 220 }}
+                    sx={{ minWidth: 170 }}
                 />
                 <Button
                     variant="contained"
@@ -205,7 +383,7 @@ export default function ToolsPage() {
                 <Button
                     variant="contained"
                     startIcon={<DownloadIcon />}
-                    onClick={exportCSV}
+                    onClick={exportXLS}
                     disabled={rows.length === 0 || loading}
                     sx={{ height: 40, borderRadius: "50px", textTransform: "none", fontWeight: "bold", whiteSpace: "nowrap", background: "linear-gradient(135deg, #06b6d4, #3b82f6)", "&:hover": { background: "linear-gradient(135deg, #0891b2, #2563eb)" } }}
                 >
@@ -222,7 +400,7 @@ export default function ToolsPage() {
                 </Button>
             </Box>
 
-            <GlassCard sx={{ p: 0, flex: 1, width: "fit-content", minWidth: 1180, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
+            <GlassCard sx={{ p: 0, flex: 1, width: "fit-content", minWidth: 1280, overflow: "hidden", "& .MuiDataGrid-root": { border: "none" } }}>
                 <DataGrid
                     rows={rows}
                     columns={columns}

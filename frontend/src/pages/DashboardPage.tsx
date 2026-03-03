@@ -4,12 +4,13 @@ import { useOutletContext } from "react-router-dom";
 import { Box, Grid, Typography, Table, TableBody, TableCell, TableHead, TableRow, TablePagination, TableContainer } from "@mui/material";
 import PeopleIcon from "@mui/icons-material/PeopleRounded";
 import MedicalIcon from "@mui/icons-material/MonitorHeartRounded";
-import BuildIcon from "@mui/icons-material/BuildRounded";
+import LightbulbIcon from "@mui/icons-material/LightbulbRounded";
 import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { MedicalExamList } from "@/components/MedicalExamList";
 import { useAppTheme } from "@/context/ThemeContext";
 import { fetchDailyMineSummary, fetchToolDebts, type DailySummaryRow, type ToolDebtRow } from "@/api/dashboard";
+import { employeeNoSearchHaystack, formatEmployeeNo } from "@/utils/employeeNo";
 
 const dashboardGradient = "linear-gradient(45deg, #3b82f6, #06b6d4)";
 const dashboardGradientTextSx = {
@@ -143,7 +144,7 @@ export default function DashboardPage() {
         const terms = normalizedSearch.split(/\s+/).filter(Boolean);
         if (terms.length === 0) return dailySummary;
         return dailySummary.filter((r) => {
-            const haystack = `${r.full_name || ""} ${r.employee_no || ""}`.toLowerCase();
+            const haystack = `${r.full_name || ""} ${employeeNoSearchHaystack(r.employee_no || "")}`.toLowerCase();
             return terms.every((term) => haystack.includes(term));
         });
     }, [dailySummary, normalizedSearch]);
@@ -152,7 +153,7 @@ export default function DashboardPage() {
         const terms = normalizedSearch.split(/\s+/).filter(Boolean);
         if (terms.length === 0) return dailyDebts;
         return dailyDebts.filter((r) => {
-            const haystack = `${r.full_name || ""} ${r.employee_no || ""}`.toLowerCase();
+            const haystack = `${r.full_name || ""} ${employeeNoSearchHaystack(r.employee_no || "")}`.toLowerCase();
             return terms.every((term) => haystack.includes(term));
         });
     }, [dailyDebts, normalizedSearch]);
@@ -210,7 +211,7 @@ export default function DashboardPage() {
                             }
                             color={tokens.brand.secondary}
                         />
-                        <KpiCard icon={<BuildIcon />} label={t("dashboard.toolDebts")} value={dailyDebts.length} color={tokens.status.warning} />
+                        <KpiCard icon={<LightbulbIcon />} label={t("dashboard.toolDebts")} value={dailyDebts.length} color={tokens.status.warning} />
                     </Box>
                     <GlassCard>
                         <Box sx={{ mb: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -238,7 +239,7 @@ export default function DashboardPage() {
                                         .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                                         .map((r) => (
                                             <TableRow key={r.employee_no} hover>
-                                                <TableCell sx={{ width: 130 }}>{r.employee_no}</TableCell>
+                                                <TableCell sx={{ width: 130 }}>{formatEmployeeNo(r.employee_no)}</TableCell>
                                                 <TableCell sx={{ width: "36%", maxWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                                     {r.full_name}
                                                 </TableCell>

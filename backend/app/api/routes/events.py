@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -64,14 +64,16 @@ def _apply_employee_search(query, search: str):
     predicates = []
     for term in terms:
         q = f"%{term}%"
-        predicates.append(
-            or_(
-                Event.employee.has(Employee.employee_no.ilike(q)),
-                Event.employee.has(Employee.first_name.ilike(q)),
-                Event.employee.has(Employee.last_name.ilike(q)),
-                Event.employee.has(Employee.patronymic.ilike(q)),
-            )
-        )
+        checks = [
+            Event.employee.has(Employee.employee_no.ilike(q)),
+            Event.employee.has(Employee.first_name.ilike(q)),
+            Event.employee.has(Employee.last_name.ilike(q)),
+            Event.employee.has(Employee.patronymic.ilike(q)),
+        ]
+        if term.isdigit():
+            normalized = term.lstrip("0") or "0"
+            checks.append(Event.employee.has(func.ltrim(Employee.employee_no, "0").ilike(f"%{normalized}%")))
+        predicates.append(or_(*checks))
 
     return query.filter(and_(*predicates))
 
@@ -326,7 +328,12 @@ def list_events(
     if status:
         query = query.filter(Event.status == status)
     if employee_no:
-        query = query.filter(Event.employee.has(Employee.employee_no.ilike(f"%{employee_no.strip()}%")))
+        employee_no_term = employee_no.strip()
+        checks = [Event.employee.has(Employee.employee_no.ilike(f"%{employee_no_term}%"))]
+        if employee_no_term.isdigit():
+            normalized = employee_no_term.lstrip("0") or "0"
+            checks.append(Event.employee.has(func.ltrim(Employee.employee_no, "0").ilike(f"%{normalized}%")))
+        query = query.filter(or_(*checks))
     if search:
         query = _apply_employee_search(query, search)
     
@@ -367,7 +374,12 @@ def list_events_paged(
     if status:
         query = query.filter(Event.status == status)
     if employee_no:
-        query = query.filter(Event.employee.has(Employee.employee_no.ilike(f"%{employee_no.strip()}%")))
+        employee_no_term = employee_no.strip()
+        checks = [Event.employee.has(Employee.employee_no.ilike(f"%{employee_no_term}%"))]
+        if employee_no_term.isdigit():
+            normalized = employee_no_term.lstrip("0") or "0"
+            checks.append(Event.employee.has(func.ltrim(Employee.employee_no, "0").ilike(f"%{normalized}%")))
+        query = query.filter(or_(*checks))
     if search:
         query = _apply_employee_search(query, search)
 

@@ -1,4 +1,4 @@
-﻿{
+{
     "app":  {
                 "name":  "DKZ MineTrack",
                 "testMode":  "Платформа работает в тестовом режиме",
@@ -210,18 +210,29 @@
                   "search":  "Поиск",
                   "searchHint":  "Имя или ID",
                   "apply":  "Применить",
-                  "exportCsv":  "Экспорт CSV",
+                  "issueNow":  "Выдать",
+                  "returnNow":  "Принять",
+                  "exportCsv":  "Экспорт XLS",
                   "exportPdf":  "Экспорт PDF",
                   "col":  {
                               "employeeNo":  "Табельный №",
                               "name":  "Ф.И.О.",
                               "turnstileTime":  "Время турникета",
                               "esmoTime":  "Время ESMO",
+                              "esmoStatus":  "Статус ESMO",
                               "toolName":  "Инструмент",
                               "quantity":  "Кол-во",
                               "issuedAt":  "Время выдачи",
+                              "returnedAt":  "Время возврата",
+                              "status":  "Статус",
                               "issuer":  "Выдал"
-                          }
+                          },
+                  "status":  {
+                                 "notIssued":  "Не выдано",
+                                 "issued":  "Выдано",
+                                 "done":  "Сдано",
+                                 "fail":  "Ошибка"
+                             }
               },
     "topbar":  {
                    "search":  "Поиск сотрудников, устройств...",
@@ -248,7 +259,13 @@
                    "noData":  "-",
                    "sync":  "Синх.",
                    "cancel":  "Отмена",
-                   "confirm":  "Подтвердить"
+                   "confirm":  "Подтвердить",
+                   "clear":  "Очистить",
+                   "today":  "Сегодня",
+                   "datePlaceholder":  "дд.мм.гггг",
+                   "dateTokenDay":  "дд",
+                   "dateTokenMonth":  "мм",
+                   "dateTokenYear":  "гггг"
                }
 }
 

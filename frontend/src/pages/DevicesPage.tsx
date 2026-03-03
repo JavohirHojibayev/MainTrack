@@ -258,11 +258,11 @@ export default function DevicesPage() {
     ];
 
     return (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <Typography variant="h4" sx={{
                 fontSize: "2.5rem",
                 fontWeight: 700,
-                mb: 3
+                mb: 1
             }}>
                 <Box component="span" sx={pageTitleGradientSx}>{t("devices.title")}</Box>
             </Typography>

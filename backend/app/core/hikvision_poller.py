@@ -26,10 +26,16 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.hikvision_client import HikvisionClient
+from app.core.hikvision_identity import (
+    HIKVISION_MINE_SYSTEM,
+    HIKVISION_SYSTEM,
+    MINE_HOSTS,
+    external_system_for_host,
+    find_employee_by_external_id,
+)
 from app.db.session import SessionLocal
 from app.models.device import Device, DeviceType
 from app.models.employee import Employee
-from app.models.employee_external_id import EmployeeExternalID
 from app.models.event import Event, EventStatus, EventType
 
 logger = logging.getLogger("hikvision.poller")
@@ -49,7 +55,6 @@ DEDUP_SECONDS = max(settings.TURNSTILE_DEDUP_SECONDS, 1)
 LOCAL_TZ = timezone(timedelta(hours=5))
 INITIAL_LOOKBACK_HOURS = max(settings.HIKVISION_INITIAL_LOOKBACK_HOURS, 1)
 RECOVERY_OVERLAP_SECONDS = max(settings.HIKVISION_RECOVERY_OVERLAP_SECONDS, 0)
-MINE_HOSTS = {"192.168.1.180", "192.168.1.181"}
 LAST_CURSOR_UTC: dict[str, datetime] = {}
 
 
@@ -205,42 +210,36 @@ def _find_employee_by_hikvision_id(
     """
     normalized_payload_name = _normalize_name(payload_name)
 
-    # Mine turnstiles may reuse employee numbers from another domain.
-    # For them, match by name first and do not trust plain employee_no fallback.
+    # Mine turnstiles have their own ID domain.
+    # They must use explicit EmployeeExternalID mapping, never name-based runtime matching.
     if host in MINE_HOSTS:
-        by_name = _find_employee_by_name(db, payload_name)
-        if by_name:
-            return by_name
-        logger.debug(
-            "[%s] Employee mapping failed for mine event: employee_no=%s payload_name=%s",
+        employee = find_employee_by_external_id(db, HIKVISION_MINE_SYSTEM, employee_no)
+        if employee:
+            return employee
+        logger.warning(
+            "[%s] Mine EmployeeExternalID mapping missing: employee_no=%s payload_name=%s system=%s",
             host,
             employee_no,
             payload_name,
+            HIKVISION_MINE_SYSTEM,
         )
         return None
 
-    # Try external ID lookup
-    ext = (
-        db.query(EmployeeExternalID)
-        .filter(
-            EmployeeExternalID.system == "HIKVISION",
-            EmployeeExternalID.external_id == employee_no,
-        )
-        .first()
-    )
-    if ext:
-        employee = db.query(Employee).filter(Employee.id == ext.employee_id).first()
-        if employee and normalized_payload_name:
-            if _employee_short_name(employee) not in normalized_payload_name:
-                logger.debug(
-                    "[%s] HIKVISION external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
-                    host,
-                    employee_no,
-                    payload_name,
-                    employee.last_name,
-                    employee.first_name,
-                )
-                return None
+    # Non-mine: external ID lookup first.
+    system = external_system_for_host(host) or HIKVISION_SYSTEM
+    employee = find_employee_by_external_id(db, system, employee_no)
+    if employee and normalized_payload_name:
+        if _employee_short_name(employee) not in normalized_payload_name:
+            logger.debug(
+                "[%s] HIKVISION external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+                host,
+                employee_no,
+                payload_name,
+                employee.last_name,
+                employee.first_name,
+            )
+            return None
+    if employee:
         return employee
 
     # Fallback: direct employee_no match
@@ -369,9 +368,29 @@ def poll_single_device(device_info: dict) -> int:
             if existing:
                 continue
 
+            payload_host = str(
+                evt_data.get("ipAddress")
+                or evt_data.get("deviceIP")
+                or evt_data.get("devIp")
+                or ""
+            ).strip()
+            if payload_host and payload_host != host:
+                logger.warning(
+                    "[%s] Skipping event with mismatched payload host=%s serial=%s employee_no=%s",
+                    host,
+                    payload_host,
+                    raw_id,
+                    employee_no,
+                )
+                continue
+
+            evt_payload = dict(evt_data)
+            evt_payload.setdefault("source_host", host)
+            evt_payload.setdefault("source_device_name", name)
+
             event_ts = parsed_ts
-            event_type = _determine_event_type(evt_data, host, device.name if device else name)
-            payload_name = str(evt_data.get("name", ""))
+            event_type = _determine_event_type(evt_payload, host, device.name if device else name)
+            payload_name = str(evt_payload.get("name", ""))
             normalized_payload_name = _normalize_name(payload_name)
 
             # Secondary dedup: some devices emit duplicated passages with different employeeNo/serialNo.
@@ -422,7 +441,7 @@ def poll_single_device(device_info: dict) -> int:
                 event_ts=event_ts,
                 raw_id=raw_id,
                 status=EventStatus.ACCEPTED,
-                source_payload=evt_data,
+                source_payload=evt_payload,
             )
             db.add(event)
 
