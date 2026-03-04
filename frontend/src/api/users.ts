@@ -14,7 +14,8 @@ export interface UserCreatePayload {
 }
 
 export interface ResetPasswordPayload {
-    password: string;
+    username?: string;
+    password?: string;
 }
 
 export const fetchUsers = async (): Promise<User[]> => {

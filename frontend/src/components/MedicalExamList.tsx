@@ -40,19 +40,6 @@ export const MedicalExamList: React.FC<MedicalExamListProps> = ({ searchQuery = 
         return parts.join(" ");
     };
 
-    const getTodayTashkent = () => {
-        const parts = new Intl.DateTimeFormat("en-US", {
-            timeZone: "Asia/Tashkent",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-        }).formatToParts(new Date());
-        const yyyy = parts.find((p) => p.type === "year")?.value ?? "1970";
-        const mm = parts.find((p) => p.type === "month")?.value ?? "01";
-        const dd = parts.find((p) => p.type === "day")?.value ?? "01";
-        return `${yyyy}-${mm}-${dd}`;
-    };
-
     const getExamDay = (rawTimestamp: string): string | null => {
         const match = String(rawTimestamp || "").match(/^(\d{4}-\d{2}-\d{2})/);
         if (match) return match[1];
@@ -71,30 +58,48 @@ export const MedicalExamList: React.FC<MedicalExamListProps> = ({ searchQuery = 
         return `${yyyy}-${mm}-${dd}`;
     };
 
+    const emitStats = (dailyData: MedicalExam[]) => {
+        if (!onStatsChange) return;
+        let passed = 0;
+        let review = 0;
+        let failed = 0;
+        for (const exam of dailyData) {
+            const s = String(exam.result || "").toLowerCase();
+            if (s === "passed") passed += 1;
+            else if (s === "review" || s === "manual_review" || s === "ko'rik" || s === "korik") review += 1;
+            else if (s === "failed" || s === "fail" || s === "rejected") failed += 1;
+        }
+        onStatsChange({ passed, review, failed, total: passed + review + failed });
+    };
+
     const loadExams = async () => {
         try {
-            const targetDay = day || getTodayTashkent();
-            const data = await fetchMedicalExams({
+            if (day) {
+                const data = await fetchMedicalExams({
+                    skip: 0,
+                    limit: 5000,
+                    start_date: day,
+                    end_date: day,
+                    latest_per_employee: true,
+                });
+                const dailyData = data.filter((exam) => getExamDay(exam.timestamp) === day);
+                setExams(dailyData);
+                emitStats(dailyData);
+                return;
+            }
+
+            // Dashboard mode: show latest available ESMO day instead of forcing current day.
+            const latestRows = await fetchMedicalExams({
                 skip: 0,
                 limit: 5000,
-                start_date: targetDay,
-                end_date: targetDay,
                 latest_per_employee: true,
             });
-            const dailyData = data.filter((exam) => getExamDay(exam.timestamp) === targetDay);
+            const latestDay = latestRows.length > 0 ? getExamDay(latestRows[0].timestamp) : null;
+            const dailyData = latestDay
+                ? latestRows.filter((exam) => getExamDay(exam.timestamp) === latestDay)
+                : [];
             setExams(dailyData);
-            if (onStatsChange) {
-                let passed = 0;
-                let review = 0;
-                let failed = 0;
-                for (const exam of dailyData) {
-                    const s = String(exam.result || "").toLowerCase();
-                    if (s === "passed") passed += 1;
-                    else if (s === "review" || s === "manual_review" || s === "ko'rik" || s === "korik") review += 1;
-                    else if (s === "failed" || s === "fail" || s === "rejected") failed += 1;
-                }
-                onStatsChange({ passed, review, failed, total: passed + review + failed });
-            }
+            emitStats(dailyData);
         } catch (error) {
             console.error("Failed to load exams", error);
         } finally {

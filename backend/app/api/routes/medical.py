@@ -16,7 +16,27 @@ from app.schemas.medical_exam import MedicalExamRead
 router = APIRouter()
 ESMO_SYSTEM = "ESMO"
 
-def _is_newer_exam(candidate: MedicalExam, current: MedicalExam) -> bool:
+def _exam_result_rank(result_raw: str | None) -> int:
+    value = (result_raw or "").strip().lower()
+    if value == "passed":
+        return 3
+    if value in {"review", "manual_review", "ko'rik", "korik"}:
+        return 2
+    if value in {"failed", "fail", "rejected"}:
+        return 1
+    return 0
+
+
+def _is_preferred_exam(candidate: MedicalExam, current: MedicalExam) -> bool:
+    """
+    Prefer passed/review over fail for per-employee dashboard snapshot.
+    If same result rank, prefer newer timestamp/source id.
+    """
+    candidate_rank = _exam_result_rank(candidate.result)
+    current_rank = _exam_result_rank(current.result)
+    if candidate_rank != current_rank:
+        return candidate_rank > current_rank
+
     cand_ts = candidate.timestamp
     curr_ts = current.timestamp
     if cand_ts > curr_ts:
@@ -238,7 +258,7 @@ def get_medical_exams(
         latest_by_employee: dict[int, MedicalExam] = {}
         for exam in all_rows:
             current = latest_by_employee.get(exam.employee_id)
-            if current is None or _is_newer_exam(exam, current):
+            if current is None or _is_preferred_exam(exam, current):
                 latest_by_employee[exam.employee_id] = exam
         deduped_rows = sorted(
             latest_by_employee.values(),

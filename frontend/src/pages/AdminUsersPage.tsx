@@ -14,8 +14,9 @@ import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { fetchUsers, createUser, resetPassword, deleteUser, type User } from "@/api/users";
 import { useAppTheme } from "@/context/ThemeContext";
+import { useAuth } from "@/context/AuthContext";
 
-const roles = ["admin", "superadmin", "dispatcher", "medical", "warehouse", "viewer"];
+const roles = ["admin", "dispatcher", "viewer"] as const;
 
 function extractApiErrorMessage(error: unknown): string {
     const fallback = "Unknown error";
@@ -32,17 +33,25 @@ function extractApiErrorMessage(error: unknown): string {
 export default function AdminUsersPage() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
+    const { role } = useAuth();
+    const canManageUsers = String(role || "").toLowerCase() === "superadmin";
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(false);
 
     // Create User State
     const [createOpen, setCreateOpen] = useState(false);
-    const [newUser, setNewUser] = useState({ username: "", password: "", role: "viewer" });
+    const [newUser, setNewUser] = useState<{ username: string; password: string; role: (typeof roles)[number] }>({
+        username: "",
+        password: "",
+        role: "viewer",
+    });
+    const [showCreatePass, setShowCreatePass] = useState(false);
     const [creating, setCreating] = useState(false);
 
     // Reset Password State
     const [resetOpen, setResetOpen] = useState(false);
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
+    const [resetUsername, setResetUsername] = useState("");
     const [newPass, setNewPass] = useState("");
     const [showNewPass, setShowNewPass] = useState(false);
     const [resetting, setResetting] = useState(false);
@@ -72,8 +81,18 @@ export default function AdminUsersPage() {
         newUser.username.trim().length >= 3 &&
         newUser.password.length >= 6 &&
         roles.includes(newUser.role);
+    const resetUsernameTrim = resetUsername.trim();
+    const resetUsernameError = resetUsernameTrim.length > 0 && resetUsernameTrim.length < 3;
+    const resetPasswordError = newPass.length > 0 && newPass.length < 6;
+    const usernameChanged = Boolean(selectedUser && resetUsernameTrim.length >= 3 && resetUsernameTrim !== selectedUser.username);
+    const passwordChanged = newPass.length >= 6;
+    const canReset = Boolean(selectedUser) && !resetUsernameError && !resetPasswordError && (usernameChanged || passwordChanged);
 
     const handleCreate = async () => {
+        if (!canManageUsers) {
+            alert("Permission denied");
+            return;
+        }
         if (!canCreate) {
             alert("Username: minimum 3 ta belgi, Password: minimum 6 ta belgi.");
             return;
@@ -97,23 +116,44 @@ export default function AdminUsersPage() {
     };
 
     const handleReset = async () => {
+        if (!canManageUsers) {
+            alert("Permission denied");
+            return;
+        }
         if (!selectedUser) return;
+        if (!canReset) {
+            alert("Login yoki paroldan kamida bittasini o'zgartiring.");
+            return;
+        }
         setResetting(true);
         try {
-            await resetPassword(selectedUser.id, { password: newPass });
+            const payload: { username?: string; password?: string } = {};
+            if (resetUsernameTrim && resetUsernameTrim !== selectedUser.username) {
+                payload.username = resetUsernameTrim;
+            }
+            if (newPass) {
+                payload.password = newPass;
+            }
+            await resetPassword(selectedUser.id, payload);
             setResetOpen(false);
             setNewPass("");
+            setResetUsername("");
             setSelectedUser(null);
-            alert("Password reset successfully");
+            await load();
+            alert("Credentials updated successfully");
         } catch (e: any) {
             console.error(e);
-            alert("Error resetting password: " + (e.message || "Unknown error"));
+            alert("Error updating credentials: " + extractApiErrorMessage(e));
         } finally {
             setResetting(false);
         }
     };
 
     const handleDelete = async () => {
+        if (!canManageUsers) {
+            alert("Permission denied");
+            return;
+        }
         if (!userToDelete) return;
         setDeleting(true);
         try {
@@ -162,8 +202,25 @@ export default function AdminUsersPage() {
                                         <Box sx={{ display: "flex", gap: 1, justifyContent: "center" }}>
                                             <Button
                                                 size="small" variant="outlined" color="warning" startIcon={<LockResetIcon />}
-                                                onClick={() => { setSelectedUser(u); setResetOpen(true); }}
-                                                sx={{ borderRadius: "8px", textTransform: "none", fontSize: "12px", py: 0.5 }}
+                                                onClick={() => {
+                                                    if (!canManageUsers) return;
+                                                    setSelectedUser(u);
+                                                    setResetUsername(u.username);
+                                                    setNewPass("");
+                                                    setResetOpen(true);
+                                                }}
+                                                disabled={!canManageUsers}
+                                                sx={{
+                                                    borderRadius: "8px",
+                                                    textTransform: "none",
+                                                    fontSize: "12px",
+                                                    py: 0.5,
+                                                    "&.Mui-disabled": {
+                                                        color: tokens.text.muted,
+                                                        borderColor: tokens.mode === "dark" ? "rgba(255,255,255,0.18)" : "rgba(15,23,42,0.18)",
+                                                        backgroundColor: tokens.mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(15,23,42,0.04)",
+                                                    },
+                                                }}
                                             >
                                                 {t("adminUsers.resetPasswordShort")}
                                             </Button>
@@ -172,9 +229,23 @@ export default function AdminUsersPage() {
                                                 variant="outlined"
                                                 color="error"
                                                 startIcon={<DeleteIcon />}
-                                                onClick={() => { setUserToDelete(u); setDeleteOpen(true); }}
-                                                disabled={u.username === "admin"}
-                                                sx={{ borderRadius: "8px", textTransform: "none", fontSize: "12px", py: 0.5 }}
+                                                onClick={() => {
+                                                    if (!canManageUsers) return;
+                                                    setUserToDelete(u);
+                                                    setDeleteOpen(true);
+                                                }}
+                                                disabled={!canManageUsers || String(u.role || "").toLowerCase() === "superadmin"}
+                                                sx={{
+                                                    borderRadius: "8px",
+                                                    textTransform: "none",
+                                                    fontSize: "12px",
+                                                    py: 0.5,
+                                                    "&.Mui-disabled": {
+                                                        color: tokens.text.muted,
+                                                        borderColor: tokens.mode === "dark" ? "rgba(255,255,255,0.18)" : "rgba(15,23,42,0.18)",
+                                                        backgroundColor: tokens.mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(15,23,42,0.04)",
+                                                    },
+                                                }}
                                             >
                                                 {t("adminUsers.delete")}
                                             </Button>
@@ -190,6 +261,7 @@ export default function AdminUsersPage() {
                     <Button
                         variant="contained" startIcon={<AddIcon />}
                         onClick={() => setCreateOpen(true)}
+                        disabled={!canManageUsers}
                         sx={{
                             borderRadius: "12px",
                             textTransform: "none",
@@ -200,7 +272,12 @@ export default function AdminUsersPage() {
                             "&:hover": {
                                 background: "linear-gradient(45deg, #1d4ed8, #0891b2)",
                                 boxShadow: "0 6px 20px 0 rgba(37,99,235,0.23)"
-                            }
+                            },
+                            "&.Mui-disabled": {
+                                color: tokens.text.muted,
+                                background: tokens.mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)",
+                                boxShadow: "none",
+                            },
                         }}
                     >
                         {t("adminUsers.createUser")}
@@ -216,44 +293,71 @@ export default function AdminUsersPage() {
                 fullWidth
                 PaperProps={{
                     sx: {
-                        borderRadius: "24px",
-                        background: "rgba(255, 255, 255, 0.8)",
-                        backdropFilter: "blur(20px)",
-                        border: "1px solid rgba(255, 255, 255, 0.18)"
+                        borderRadius: `${tokens.radius.md}px`,
+                        background: tokens.bg.card,
+                        backdropFilter: `blur(${tokens.glass.blur})`,
+                        border: tokens.glass.border,
+                        boxShadow: tokens.mode === "dark"
+                            ? "0 24px 60px rgba(0, 0, 0, 0.45)"
+                            : "0 20px 40px rgba(15, 23, 42, 0.18)",
                     }
                 }}
             >
-                <DialogTitle sx={{ fontWeight: 700, fontSize: "1.5rem" }}>{t("adminUsers.createUser")}</DialogTitle>
+                <DialogTitle
+                    sx={{
+                        fontWeight: 800,
+                        fontSize: "1.35rem",
+                        background: "linear-gradient(45deg, #3b82f6, #06b6d4)",
+                        WebkitBackgroundClip: "text",
+                        WebkitTextFillColor: "transparent",
+                        pb: 1,
+                    }}
+                >
+                    {t("adminUsers.createUser")}
+                </DialogTitle>
                 <DialogContent>
-                    <Box sx={{ display: "flex", flexDirection: "column", gap: 3, mt: 1 }}>
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
                         <TextField
                             label={t("adminUsers.username")}
                             fullWidth
                             value={newUser.username}
                             onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                            variant="filled"
+                            variant="outlined"
+                            size="small"
                             error={usernameError}
                             helperText={usernameError ? "Minimum 3 characters" : ""}
-                            InputProps={{ disableUnderline: true, sx: { borderRadius: "12px" } }}
+                            sx={{
+                                "& .MuiOutlinedInput-root": { borderRadius: `${tokens.radius.sm}px` },
+                            }}
                         />
                         <TextField
                             label={t("adminUsers.password")}
-                            type="password"
+                            type={showCreatePass ? "text" : "password"}
                             fullWidth
                             value={newUser.password}
                             onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                            variant="filled"
+                            variant="outlined"
+                            size="small"
                             error={passwordError}
-                            InputProps={{ disableUnderline: true, sx: { borderRadius: "12px" } }}
+                            sx={{
+                                "& .MuiOutlinedInput-root": { borderRadius: `${tokens.radius.sm}px` },
+                            }}
+                            InputProps={{
+                                endAdornment: (
+                                    <IconButton onClick={() => setShowCreatePass((prev) => !prev)} edge="end" sx={{ mr: 0.5 }}>
+                                        {showCreatePass ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                    </IconButton>
+                                ),
+                            }}
                             helperText="Minimum 6 characters"
                         />
                         <Select
                             fullWidth
                             value={newUser.role}
-                            onChange={(e) => setNewUser({ ...newUser, role: String(e.target.value) })}
-                            variant="filled"
-                            disableUnderline
-                            sx={{ borderRadius: "12px" }}
+                            onChange={(e) => setNewUser({ ...newUser, role: e.target.value as (typeof roles)[number] })}
+                            variant="outlined"
+                            size="small"
+                            sx={{ borderRadius: `${tokens.radius.sm}px` }}
                         >
                             {roles.map((role) => (
                                 <MenuItem key={role} value={role}>{role.toUpperCase()}</MenuItem>
@@ -269,7 +373,7 @@ export default function AdminUsersPage() {
                         disabled={creating || !canCreate}
                         startIcon={creating ? <CircularProgress size={16} /> : null}
                         sx={{
-                            borderRadius: "12px",
+                            borderRadius: `${tokens.radius.sm}px`,
                             fontWeight: 700,
                             background: "linear-gradient(45deg, #2563eb, #06b6d4)",
                         }}
@@ -282,7 +386,12 @@ export default function AdminUsersPage() {
             {/* Reset Password Dialog */}
             <Dialog
                 open={resetOpen}
-                onClose={() => setResetOpen(false)}
+                onClose={() => {
+                    setResetOpen(false);
+                    setResetUsername("");
+                    setNewPass("");
+                    setSelectedUser(null);
+                }}
                 maxWidth="xs"
                 fullWidth
                 PaperProps={{
@@ -300,12 +409,24 @@ export default function AdminUsersPage() {
                         {t("adminUsers.confirmReset")} <b>{selectedUser?.username}</b>
                     </Typography>
                     <TextField
+                        label={t("adminUsers.username")}
+                        fullWidth
+                        value={resetUsername}
+                        onChange={(e) => setResetUsername(e.target.value)}
+                        variant="filled"
+                        error={resetUsernameError}
+                        helperText={resetUsernameError ? "Minimum 3 characters" : ""}
+                        InputProps={{ disableUnderline: true, sx: { borderRadius: "12px" } }}
+                        sx={{ mb: 2 }}
+                    />
+                    <TextField
                         label={t("adminUsers.newPassword")}
                         type={showNewPass ? "text" : "password"}
                         fullWidth
                         value={newPass}
                         onChange={(e) => setNewPass(e.target.value)}
                         variant="filled"
+                        error={resetPasswordError}
                         InputProps={{
                             disableUnderline: true,
                             sx: { borderRadius: "12px" },
@@ -315,7 +436,7 @@ export default function AdminUsersPage() {
                                 </IconButton>
                             )
                         }}
-                        helperText="Minimum 6 characters"
+                        helperText="Minimum 6 characters (optional)"
                     />
                 </DialogContent>
                 <DialogActions sx={{ p: 3 }}>
@@ -324,7 +445,7 @@ export default function AdminUsersPage() {
                         onClick={handleReset}
                         variant="contained"
                         color="warning"
-                        disabled={resetting}
+                        disabled={resetting || !canReset}
                         startIcon={resetting ? <CircularProgress size={16} /> : null}
                         sx={{
                             borderRadius: "12px",

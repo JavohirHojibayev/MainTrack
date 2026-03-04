@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Box, Typography, TextField, Button, Alert, InputAdornment, IconButton } from "@mui/material";
+import { Box, Typography, TextField, Button, Alert, InputAdornment, IconButton, Checkbox, FormControlLabel } from "@mui/material";
 import VisibilityIcon from "@mui/icons-material/VisibilityRounded";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOffRounded";
 import { ThemeProvider } from "@mui/material";
@@ -19,6 +19,7 @@ export default function LoginPage() {
     const navigate = useNavigate();
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
+    const [rememberMe, setRememberMe] = useState(true);
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
@@ -28,7 +29,7 @@ export default function LoginPage() {
         setError("");
         setLoading(true);
         try {
-            await login(username, password);
+            await login(username, password, rememberMe);
             navigate("/dashboard", { replace: true });
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : t("auth.loginFailed"));
@@ -77,7 +78,7 @@ export default function LoginPage() {
                         fullWidth
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        sx={{ mb: 3 }}
+                        sx={{ mb: 1 }}
                         InputProps={{
                             endAdornment: (
                                 <InputAdornment position="end">
@@ -87,6 +88,18 @@ export default function LoginPage() {
                                 </InputAdornment>
                             ),
                         }}
+                    />
+                    <FormControlLabel
+                        sx={{ mb: 2, ml: 0.5, color: tokens.text.secondary }}
+                        control={
+                            <Checkbox
+                                size="small"
+                                checked={rememberMe}
+                                onChange={(e) => setRememberMe(e.target.checked)}
+                                sx={{ color: tokens.text.muted }}
+                            />
+                        }
+                        label={t("auth.rememberMe", "Remember me")}
                     />
                     <Button type="submit" variant="contained" fullWidth size="large" disabled={loading}>
                         {loading ? t("auth.signingIn") : t("auth.signIn")}

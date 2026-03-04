@@ -122,7 +122,7 @@ def toggle_device_power(
     device_id: int,
     payload: DevicePowerToggle,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("superadmin", "admin", "dispatcher", "medical", "warehouse", "viewer")),
+    current_user: User = Depends(require_roles("superadmin")),
 ) -> DeviceOut:
     if payload.password != settings.DEVICE_CONTROL_PASSWORD:
         raise HTTPException(status_code=403, detail="Invalid control password")

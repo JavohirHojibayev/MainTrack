@@ -17,6 +17,7 @@
     "auth": {
         "username": "Foydalanuvchi nomi",
         "password": "Parol",
+        "rememberMe": "Eslab qolish",
         "signIn": "Kirish",
         "signingIn": "Kirilmoqda...",
         "invalidCredentials": "Login yoki parol noto'g'ri",

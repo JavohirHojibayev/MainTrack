@@ -20,6 +20,7 @@ import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { fetchDevices, toggleDevicePower, type Device } from "@/api/devices";
 import { useAppTheme } from "@/context/ThemeContext";
+import { useAuth } from "@/context/AuthContext";
 
 const allowedEsmoHosts = new Set(["192.168.8.17", "192.168.8.18", "192.168.8.19", "192.168.8.20"]);
 const prioritizedTurnstileHosts = new Set(["192.168.1.180", "192.168.1.181"]);
@@ -33,6 +34,13 @@ const esmoMetaByHost: Record<string, { model: string; serial: string }> = {
     "192.168.8.19": { model: "MT", serial: "SN020245002" },
     "192.168.8.20": { model: "MT-02", serial: "SN020245004" },
 };
+
+function isLampSelfManualDevice(device: Device): boolean {
+    return (
+        (device.device_code || "").toUpperCase() === "LAMP_SELF_MANUAL" ||
+        (device.name || "").trim().toLowerCase() === "lamp & self-rescuer manual"
+    );
+}
 
 const pageTitleGradientSx = {
     backgroundImage: "linear-gradient(45deg, #3b82f6 0%, #06b6d4 100%)",
@@ -52,6 +60,8 @@ const sectionTitleSx = {
 export default function DevicesPage() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
+    const { role } = useAuth();
+    const canToggleDevicePower = String(role || "").toLowerCase() === "superadmin";
     const [devices, setDevices] = useState<Device[]>([]);
     const [dialogDevice, setDialogDevice] = useState<Device | null>(null);
     const [dialogTargetActive, setDialogTargetActive] = useState<boolean>(true);
@@ -64,7 +74,7 @@ export default function DevicesPage() {
         return !!d.host && allowedEsmoHosts.has(d.host);
     });
     const turnstileDevices = visibleDevices
-        .filter((d) => d.device_type !== "ESMO")
+        .filter((d) => d.device_type !== "ESMO" && !isLampSelfManualDevice(d))
         .sort((a, b) => {
             const aPriority = a.host && prioritizedTurnstileHosts.has(a.host) ? 0 : 1;
             const bPriority = b.host && prioritizedTurnstileHosts.has(b.host) ? 0 : 1;
@@ -100,6 +110,7 @@ export default function DevicesPage() {
     };
 
     const openPowerDialog = (device: Device, nextActive: boolean) => {
+        if (!canToggleDevicePower) return;
         setDialogDevice(device);
         setDialogTargetActive(nextActive);
         setPowerPassword("");
@@ -113,6 +124,10 @@ export default function DevicesPage() {
     };
 
     const savePowerState = async () => {
+        if (!canToggleDevicePower) {
+            window.alert("Permission denied");
+            return;
+        }
         if (!dialogDevice) return;
         setPowerSaving(true);
         try {
@@ -182,7 +197,17 @@ export default function DevicesPage() {
                         size="small"
                         variant="outlined"
                         color={active ? "error" : "primary"}
-                        sx={{ textTransform: "none", borderRadius: "999px", fontWeight: 700 }}
+                        disabled={!canToggleDevicePower}
+                        sx={{
+                            textTransform: "none",
+                            borderRadius: "999px",
+                            fontWeight: 700,
+                            "&.Mui-disabled": {
+                                color: tokens.text.muted,
+                                borderColor: tokens.mode === "dark" ? "rgba(255,255,255,0.18)" : "rgba(15,23,42,0.18)",
+                                backgroundColor: tokens.mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(15,23,42,0.04)",
+                            },
+                        }}
                         onClick={() => openPowerDialog(params.row, !active)}
                     >
                         {active ? t("devices.turnOff") : t("devices.turnOn")}
@@ -247,7 +272,17 @@ export default function DevicesPage() {
                         size="small"
                         variant="outlined"
                         color={active ? "error" : "primary"}
-                        sx={{ textTransform: "none", borderRadius: "999px", fontWeight: 700 }}
+                        disabled={!canToggleDevicePower}
+                        sx={{
+                            textTransform: "none",
+                            borderRadius: "999px",
+                            fontWeight: 700,
+                            "&.Mui-disabled": {
+                                color: tokens.text.muted,
+                                borderColor: tokens.mode === "dark" ? "rgba(255,255,255,0.18)" : "rgba(15,23,42,0.18)",
+                                backgroundColor: tokens.mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(15,23,42,0.04)",
+                            },
+                        }}
                         onClick={() => openPowerDialog(params.row, !active)}
                     >
                         {active ? t("devices.turnOff") : t("devices.turnOn")}

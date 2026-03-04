@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Box, Typography, TextField, Button, Grid, Drawer, IconButton } from "@mui/material";
+import { Box, Typography, TextField, Button, Grid } from "@mui/material";
 import { DataGrid, type GridColDef, type GridPaginationModel } from "@mui/x-data-grid";
-import CloseIcon from "@mui/icons-material/CloseRounded";
 import DownloadIcon from "@mui/icons-material/DownloadRounded";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfRounded";
 import GlassCard from "@/components/GlassCard";
@@ -30,7 +29,6 @@ export default function TurnstileJournalPage() {
     const [rows, setRows] = useState<EventRow[]>([]);
     const [loading, setLoading] = useState(false);
     const [filters, setFilters] = useState<EventFilters>({ turnstile_only: true });
-    const [selected, setSelected] = useState<EventRow | null>(null);
     const [rowCount, setRowCount] = useState(0);
     const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
     const dedupeWindowMs = 20 * 1000;
@@ -58,6 +56,19 @@ export default function TurnstileJournalPage() {
         if (row.device_host === "192.168.1.181") return "shaxta kirish";
         if (row.device_host === "192.168.1.180") return "shaxta chiqish";
         return row.device_name || String(row.device_id);
+    };
+
+    const getTurnstileDirection = (row: EventRow): { text: string; color: "INSIDE" | "OUTSIDE" } => {
+        const deviceName = getTurnstileDeviceName(row).toLowerCase();
+        const isEntryByDevice = deviceName.includes("kirish") || deviceName.includes("entry");
+        const isExitByDevice = deviceName.includes("chiqish") || deviceName.includes("exit");
+        const isEntryByType = row.event_type === "TURNSTILE_IN" || row.event_type === "MINE_IN";
+        const isExitByType = row.event_type === "TURNSTILE_OUT" || row.event_type === "MINE_OUT";
+        const isEntry = isEntryByDevice || (!isExitByDevice && isEntryByType && !isExitByType);
+        return {
+            text: isEntry ? t("dashboard.statusInside") : t("dashboard.statusOutside"),
+            color: isEntry ? "INSIDE" : "OUTSIDE",
+        };
     };
 
     const columns: GridColDef[] = [
@@ -92,16 +103,11 @@ export default function TurnstileJournalPage() {
             width: 130,
             hideable: false,
             renderCell: (p) => {
-                const deviceName = getTurnstileDeviceName(p.row as EventRow).toLowerCase();
-                const isEntryByDevice = deviceName.includes("kirish") || deviceName.includes("entry");
-                const isExitByDevice = deviceName.includes("chiqish") || deviceName.includes("exit");
-                const isEntryByType = p.row.event_type === "TURNSTILE_IN" || p.row.event_type === "MINE_IN";
-                const isExitByType = p.row.event_type === "TURNSTILE_OUT" || p.row.event_type === "MINE_OUT";
-                const isEntry = isEntryByDevice || (!isExitByDevice && isEntryByType && !isExitByType);
+                const direction = getTurnstileDirection(p.row as EventRow);
                 return (
                     <StatusPill
-                        status={isEntry ? t("dashboard.statusInside") : t("dashboard.statusOutside")}
-                        colorStatus={isEntry ? "INSIDE" : "OUTSIDE"}
+                        status={direction.text}
+                        colorStatus={direction.color}
                     />
                 );
             }
@@ -262,7 +268,6 @@ export default function TurnstileJournalPage() {
                         setPaginationModel(model);
                         load(model.page, model.pageSize);
                     }}
-                    onRowClick={(p) => setSelected(p.row as EventRow)}
                     disableColumnSorting
                     disableColumnMenu
                     sx={{
@@ -274,26 +279,6 @@ export default function TurnstileJournalPage() {
                     }}
                 />
             </GlassCard>
-            <Drawer anchor="right" open={!!selected} onClose={() => setSelected(null)}>
-                <Box sx={{ width: 400, p: 3 }}>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
-                        <Typography variant="h6">{t("events.details")}</Typography>
-                        <IconButton onClick={() => setSelected(null)}><CloseIcon /></IconButton>
-                    </Box>
-                    {selected && (
-                        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                            <Typography variant="body2"><strong>{t("events.id")}:</strong> {selected.id}</Typography>
-                            <Typography variant="body2"><strong>{t("events.col.time")}:</strong> {new Date(selected.event_ts).toLocaleString()}</Typography>
-                            <Typography variant="body2"><strong>{t("events.col.type")}:</strong> {selected.event_type}</Typography>
-                            <Typography variant="body2"><strong>{t("events.employeeId")}:</strong> {selected.employee_id}</Typography>
-                            <Typography variant="body2"><strong>{t("events.deviceId")}:</strong> {selected.device_id}</Typography>
-                            <Box><strong>{t("events.col.status")}:</strong> <StatusPill status={selected.status} /></Box>
-                            {selected.reject_reason && <Typography variant="body2" sx={{ color: tokens.status.blocked }}><strong>{t("events.col.reason")}:</strong> {selected.reject_reason}</Typography>}
-                            <Typography variant="body2"><strong>{t("events.rawId")}:</strong> {selected.raw_id}</Typography>
-                        </Box>
-                    )}
-                </Box>
-            </Drawer>
         </Box>
     );
 }

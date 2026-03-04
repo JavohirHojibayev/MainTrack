@@ -1,8 +1,9 @@
 const BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
+const TOKEN_KEY = "minetrack_token";
 
 function getToken(): string | null {
-    return localStorage.getItem("minetrack_token");
+    return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -14,7 +15,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const res = await fetch(`${BASE}${path}`, { ...init, headers });
 
     if (res.status === 401) {
-        localStorage.removeItem("minetrack_token");
+        localStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(TOKEN_KEY);
         window.location.href = "/login";
         throw new Error("Unauthorized");
     }

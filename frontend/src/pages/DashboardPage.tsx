@@ -9,7 +9,8 @@ import GlassCard from "@/components/GlassCard";
 import StatusPill from "@/components/StatusPill";
 import { MedicalExamList } from "@/components/MedicalExamList";
 import { useAppTheme } from "@/context/ThemeContext";
-import { fetchDailyMineSummary, fetchToolDebts, type DailySummaryRow, type ToolDebtRow } from "@/api/dashboard";
+import { fetchDailyMineSummary, type DailySummaryRow } from "@/api/dashboard";
+import { fetchLampSelfRows, type LampSelfRow } from "@/api/tools";
 import { employeeNoSearchHaystack, formatEmployeeNo } from "@/utils/employeeNo";
 
 const dashboardGradient = "linear-gradient(45deg, #3b82f6, #06b6d4)";
@@ -64,7 +65,7 @@ function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: 
 }
 
 function fmt(iso: string | null) {
-    if (!iso) return "—";
+    if (!iso) return "-";
     try { return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); } catch { return iso; }
 }
 
@@ -78,6 +79,13 @@ function getLastActivityMs(row: DailySummaryRow): number {
     const inTs = row.last_in ? new Date(row.last_in).getTime() : 0;
     const outTs = row.last_out ? new Date(row.last_out).getTime() : 0;
     return Math.max(inTs, outTs);
+}
+
+function getLastToolActivityMs(row: LampSelfRow): number {
+    const issuedTs = row.issued_at ? new Date(row.issued_at).getTime() : 0;
+    const returnedTs = row.returned_at ? new Date(row.returned_at).getTime() : 0;
+    const esmoTs = row.esmo_time ? new Date(row.esmo_time).getTime() : 0;
+    return Math.max(issuedTs, returnedTs, esmoTs);
 }
 
 function getTodayTashkent(): string {
@@ -98,15 +106,15 @@ export default function DashboardPage() {
     const { tokens } = useAppTheme();
     const { searchQuery } = useOutletContext<{ searchQuery: string }>();
     const [summary, setSummary] = useState<DailySummaryRow[]>([]);
-    const [debts, setDebts] = useState<ToolDebtRow[]>([]);
+    const [toolRows, setToolRows] = useState<LampSelfRow[]>([]);
     const [dashboardDay, setDashboardDay] = useState<string>(getTodayTashkent());
     const [esmoSummary, setEsmoSummary] = useState<{ passed: number; failed: number; review: number; total: number }>({ passed: 0, failed: 0, review: 0, total: 0 });
     const [page, setPage] = useState(0);
     const [rowsPerPage, setRowsPerPage] = useState(10);
 
     // Side tables pagination
-    const [debtsPage, setDebtsPage] = useState(0);
-    const [debtsRowsPerPage, setDebtsRowsPerPage] = useState(5);
+    const [toolsPage, setToolsPage] = useState(0);
+    const [toolsRowsPerPage, setToolsRowsPerPage] = useState(5);
 
     useEffect(() => {
         const load = () => {
@@ -124,7 +132,16 @@ export default function DashboardPage() {
                     setSummary(sorted);
                 })
                 .catch(() => { });
-            fetchToolDebts(today).then(setDebts).catch(() => { });
+            fetchLampSelfRows({ start_date: today, end_date: today })
+                .then((rows) => {
+                    const filtered = rows
+                        .filter((row) => Boolean(row.issued_at) || Boolean(row.returned_at) || row.status === "FAIL")
+                        .sort((a, b) => getLastToolActivityMs(b) - getLastToolActivityMs(a));
+                    setToolRows(filtered);
+                })
+                .catch(() => {
+                    setToolRows([]);
+                });
         };
         load();
         const interval = setInterval(load, 30000);
@@ -133,12 +150,12 @@ export default function DashboardPage() {
 
     useEffect(() => {
         setPage(0);
-        setDebtsPage(0);
+        setToolsPage(0);
     }, [searchQuery]);
 
     const normalizedSearch = searchQuery.trim().toLowerCase();
     const dailySummary = summary;
-    const dailyDebts = debts;
+    const dailyTools = toolRows;
 
     const filteredSummary = useMemo(() => {
         const terms = normalizedSearch.split(/\s+/).filter(Boolean);
@@ -149,18 +166,40 @@ export default function DashboardPage() {
         });
     }, [dailySummary, normalizedSearch]);
 
-    const filteredDebts = useMemo(() => {
+    const filteredTools = useMemo(() => {
         const terms = normalizedSearch.split(/\s+/).filter(Boolean);
-        if (terms.length === 0) return dailyDebts;
-        return dailyDebts.filter((r) => {
+        if (terms.length === 0) return dailyTools;
+        return dailyTools.filter((r) => {
             const haystack = `${r.full_name || ""} ${employeeNoSearchHaystack(r.employee_no || "")}`.toLowerCase();
             return terms.every((term) => haystack.includes(term));
         });
-    }, [dailyDebts, normalizedSearch]);
+    }, [dailyTools, normalizedSearch]);
 
     const insideCount = dailySummary.filter((r) => Boolean(r.entered_today)).length;
     const outsideCount = dailySummary.filter((r) => Boolean(r.exited_today)).length;
+    const issuedCount = useMemo(
+        () => new Set(dailyTools.filter((r) => Boolean(r.issued_at)).map((r) => r.employee_id)).size,
+        [dailyTools]
+    );
+    const returnedCount = useMemo(
+        () => new Set(dailyTools.filter((r) => Boolean(r.returned_at)).map((r) => r.employee_id)).size,
+        [dailyTools]
+    );
     const summaryInnerScrollEnabled = rowsPerPage > 10;
+
+    const formatToolStatus = (raw: string) => {
+        if (raw === "ISSUED") return t("tools.status.issued");
+        if (raw === "DONE") return t("tools.status.done");
+        if (raw === "FAIL") return t("tools.status.fail");
+        return t("tools.status.notIssued");
+    };
+
+    const toolStatusColor = (raw: string) => {
+        if (raw === "ISSUED") return "WARNING";
+        if (raw === "DONE") return "OK";
+        if (raw === "FAIL") return "FAIL";
+        return null;
+    };
 
     return (
         <Box>
@@ -211,7 +250,18 @@ export default function DashboardPage() {
                             }
                             color={tokens.brand.secondary}
                         />
-                        <KpiCard icon={<LightbulbIcon />} label={t("dashboard.toolDebts")} value={dailyDebts.length} color={tokens.status.warning} />
+                        <KpiCard
+                            icon={<LightbulbIcon />}
+                            label={t("dashboard.toolDebts")}
+                            value={
+                                <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                    <Box component="span" sx={{ ...dashboardGradientTextSx }}>{issuedCount}</Box>
+                                    <Box component="span" sx={{ color: tokens.text.muted, fontSize: "1.1rem" }}>/</Box>
+                                    <Box component="span" sx={{ ...dashboardGradientTextSx }}>{returnedCount}</Box>
+                                </Box>
+                            }
+                            color={tokens.status.warning}
+                        />
                     </Box>
                     <GlassCard>
                         <Box sx={{ mb: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -282,25 +332,56 @@ export default function DashboardPage() {
                             <Typography variant="h6" sx={{ mb: 2, color: tokens.status.warning, fontWeight: 700 }}>{t("dashboard.toolDebts")}</Typography>
                             <TableContainer sx={{ maxHeight: 300, overflowY: "auto" }}>
                                 <Table size="small" stickyHeader>
-                                    <TableHead><TableRow><TableCell>{t("dashboard.employee")}</TableCell><TableCell>{t("dashboard.taken")}</TableCell></TableRow></TableHead>
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell>{t("dashboard.employee")}</TableCell>
+                                            <TableCell>{t("dashboard.taken")}</TableCell>
+                                            <TableCell>{t("tools.col.returnedAt")}</TableCell>
+                                            <TableCell>{t("dashboard.status")}</TableCell>
+                                        </TableRow>
+                                    </TableHead>
                                     <TableBody>
-                                        {filteredDebts
-                                            .slice(debtsPage * debtsRowsPerPage, debtsPage * debtsRowsPerPage + debtsRowsPerPage)
-                                            .map((r) => <TableRow key={r.employee_no}><TableCell>{r.full_name}</TableCell><TableCell>{fmt(r.last_take)}</TableCell></TableRow>)}
-                                        {filteredDebts.length === 0 && <TableRow><TableCell colSpan={2} sx={{ textAlign: "center", color: tokens.text.muted }}>{t("dashboard.noDebts")}</TableCell></TableRow>}
+                                        {filteredTools
+                                            .slice(toolsPage * toolsRowsPerPage, toolsPage * toolsRowsPerPage + toolsRowsPerPage)
+                                            .map((r) => {
+                                                const colorStatus = toolStatusColor(r.status);
+                                                return (
+                                                    <TableRow key={`${r.employee_id}-${r.employee_no}-${r.issued_at || ""}-${r.returned_at || ""}`} hover>
+                                                        <TableCell sx={{ maxWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                            {r.full_name}
+                                                        </TableCell>
+                                                        <TableCell>{fmt(r.issued_at)}</TableCell>
+                                                        <TableCell>{fmt(r.returned_at)}</TableCell>
+                                                        <TableCell>
+                                                            {colorStatus ? (
+                                                                <StatusPill status={formatToolStatus(r.status)} colorStatus={colorStatus} />
+                                                            ) : (
+                                                                <Typography sx={{ color: tokens.text.muted }}>{formatToolStatus(r.status)}</Typography>
+                                                            )}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                );
+                                            })}
+                                        {filteredTools.length === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={4} sx={{ textAlign: "center", color: tokens.text.muted }}>
+                                                    {t("dashboard.noData")}
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
                                     </TableBody>
                                 </Table>
                             </TableContainer>
                             <TablePagination
                                 rowsPerPageOptions={[5, 10, 25, 50]}
                                 component="div"
-                                count={filteredDebts.length}
-                                rowsPerPage={debtsRowsPerPage}
-                                page={debtsPage}
-                                onPageChange={(e, p) => setDebtsPage(p)}
+                                count={filteredTools.length}
+                                rowsPerPage={toolsRowsPerPage}
+                                page={toolsPage}
+                                onPageChange={(e, p) => setToolsPage(p)}
                                 onRowsPerPageChange={(e) => {
-                                    setDebtsRowsPerPage(parseInt(e.target.value, 10));
-                                    setDebtsPage(0);
+                                    setToolsRowsPerPage(parseInt(e.target.value, 10));
+                                    setToolsPage(0);
                                 }}
                                 sx={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
                             />
@@ -311,3 +392,4 @@ export default function DashboardPage() {
         </Box>
     );
 }
+

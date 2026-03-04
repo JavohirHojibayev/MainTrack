@@ -127,6 +127,56 @@ def _latest_esmo_exam_today(db: Session, employee_id: int) -> MedicalExam | None
     )
 
 
+def _is_preferred_esmo_exam(candidate: MedicalExam, current: MedicalExam) -> bool:
+    """
+    Prefer passed/review over fail regardless of timestamp.
+    If same result rank, prefer newer timestamp/source id.
+    """
+    candidate_rank = _esmo_result_rank(candidate.result)
+    current_rank = _esmo_result_rank(current.result)
+    if candidate_rank != current_rank:
+        return candidate_rank > current_rank
+
+    if candidate.timestamp > current.timestamp:
+        return True
+    if candidate.timestamp < current.timestamp:
+        return False
+
+    candidate_esmo_id = int(candidate.esmo_id or 0)
+    current_esmo_id = int(current.esmo_id or 0)
+    if candidate_esmo_id > current_esmo_id:
+        return True
+    if candidate_esmo_id < current_esmo_id:
+        return False
+
+    return int(candidate.id or 0) > int(current.id or 0)
+
+
+def _effective_esmo_exam_today(db: Session, employee_id: int) -> MedicalExam | None:
+    today = _current_local_day()
+    start_local, end_local = _local_day_bounds(today)
+    start_naive = start_local.replace(tzinfo=None)
+    end_naive = end_local.replace(tzinfo=None)
+
+    rows = (
+        db.query(MedicalExam)
+        .filter(
+            MedicalExam.employee_id == employee_id,
+            MedicalExam.terminal_name.in_(get_allowed_esmo_terminal_names()),
+            MedicalExam.timestamp >= start_naive,
+            MedicalExam.timestamp < end_naive,
+        )
+        .order_by(MedicalExam.timestamp.desc(), MedicalExam.esmo_id.desc().nullslast(), MedicalExam.id.desc())
+        .all()
+    )
+
+    selected: MedicalExam | None = None
+    for exam in rows:
+        if selected is None or _is_preferred_esmo_exam(exam, selected):
+            selected = exam
+    return selected
+
+
 def _last_tool_take_return(db: Session, employee_id: int) -> tuple[datetime | None, datetime | None]:
     row = (
         db.query(
@@ -204,21 +254,23 @@ def _latest_esmo_result_counts(
         esmo_key = int(esmo_id or 0)
         normalized = (raw_result or "").strip().lower()
         current = latest_result_by_employee.get(employee_id)
+        candidate_rank = _esmo_result_rank(normalized)
         if current is None:
-            latest_result_by_employee[employee_id] = (normalized, ts, row_id, esmo_key, _esmo_result_rank(normalized))
+            latest_result_by_employee[employee_id] = (normalized, ts, row_id, esmo_key, candidate_rank)
             continue
 
         _current_result, current_ts, current_id, current_esmo_key, current_rank = current
-        candidate_rank = _esmo_result_rank(normalized)
         should_replace = False
-        if ts > current_ts:
+        if candidate_rank > current_rank:
+            should_replace = True
+        elif candidate_rank < current_rank:
+            should_replace = False
+        elif ts > current_ts:
             should_replace = True
         elif ts == current_ts:
             if esmo_key > current_esmo_key:
                 should_replace = True
-            elif esmo_key == current_esmo_key and candidate_rank > current_rank:
-                should_replace = True
-            elif esmo_key == current_esmo_key and candidate_rank == current_rank and row_id > current_id:
+            elif esmo_key == current_esmo_key and row_id > current_id:
                 should_replace = True
 
         if should_replace:
@@ -411,7 +463,8 @@ def lamp_self_rescuer_status(
 
     latest_exam_by_employee: dict[int, MedicalExam] = {}
     for exam in exam_rows:
-        if exam.employee_id not in latest_exam_by_employee:
+        current = latest_exam_by_employee.get(exam.employee_id)
+        if current is None or _is_preferred_esmo_exam(exam, current):
             latest_exam_by_employee[exam.employee_id] = exam
 
     if not latest_exam_by_employee:
@@ -553,13 +606,13 @@ def issue_lamp_self_rescuer(
     if employee is None:
         return LampSelfActionOut(success=False, status="FAIL", message="Employee not found")
 
-    latest_exam = _latest_esmo_exam_today(db, employee.id)
+    latest_exam = _effective_esmo_exam_today(db, employee.id)
     if latest_exam is None:
         return LampSelfActionOut(success=False, status="FAIL", message="No ESMO exam today")
 
     latest_result = _normalize_esmo_result(latest_exam.result)
     if latest_result not in {"passed", "review"}:
-        return LampSelfActionOut(success=False, status="FAIL", message="Latest ESMO status is not passed")
+        return LampSelfActionOut(success=False, status="FAIL", message="ESMO status is not passed/review")
 
     last_take, last_return = _last_tool_take_return(db, employee.id)
     has_active_issue = bool(last_take and (last_return is None or last_take > last_return))

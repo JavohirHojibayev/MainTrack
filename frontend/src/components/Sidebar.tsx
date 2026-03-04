@@ -10,13 +10,16 @@ import MedicalServicesIcon from "@mui/icons-material/MedicalServicesRounded";
 import AdminIcon from "@mui/icons-material/AdminPanelSettingsRounded";
 import LightbulbIcon from "@mui/icons-material/LightbulbRounded";
 import { useAppTheme } from "@/context/ThemeContext";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Sidebar() {
     const { t } = useTranslation();
     const { tokens } = useAppTheme();
+    const { role } = useAuth();
     const location = useLocation();
     const navigate = useNavigate();
     const w = tokens.sidebar.widthCollapsed;
+    const isViewer = String(role || "").toLowerCase() === "viewer";
 
     const navItems = [
         { path: "/dashboard", label: t("nav.dashboard"), icon: <DashboardIcon /> },
@@ -24,10 +27,11 @@ export default function Sidebar() {
         { path: "/esmo-journal", label: t("nav.esmo"), icon: <MedicalServicesIcon /> },
         { path: "/lamp-self-rescuer", label: t("nav.tools"), icon: <LightbulbIcon /> },
         { path: "/reports", label: t("nav.reports"), icon: <AssessmentIcon /> },
-        { path: "/employees", label: t("nav.employees"), icon: <PeopleIcon /> },
-        { path: "/devices", label: t("nav.devices"), icon: <DevicesIcon /> },
-        { path: "/user-management", label: t("adminUsers.title"), icon: <AdminIcon /> },
+        { path: "/employees", label: t("nav.employees"), icon: <PeopleIcon />, hideForViewer: true },
+        { path: "/devices", label: t("nav.devices"), icon: <DevicesIcon />, hideForViewer: true },
+        { path: "/user-management", label: t("adminUsers.title"), icon: <AdminIcon />, hideForViewer: true },
     ];
+    const visibleNavItems = navItems.filter((item) => !(isViewer && item.hideForViewer));
 
     return (
         <Box
@@ -44,7 +48,7 @@ export default function Sidebar() {
             </Box>
 
             <List sx={{ width: "100%", flex: 1 }}>
-                {navItems.map((item) => {
+                {visibleNavItems.map((item) => {
                     const active = location.pathname.startsWith(item.path);
                     return (
                         <Tooltip key={item.path} title={item.label} placement="right" arrow>

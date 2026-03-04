@@ -24,12 +24,33 @@ export default function App() {
                             <Route path="/dashboard" element={<DashboardPage />} />
                             <Route path="/turnstile-journal" element={<TurnstileJournalPage />} />
                             <Route path="/esmo-journal" element={<EsmoJournalPage />} />
-                            <Route path="/employees" element={<EmployeesPage />} />
-                            <Route path="/devices" element={<DevicesPage />} />
+                            <Route
+                                path="/employees"
+                                element={
+                                    <ProtectedRoute allowedRoles={["superadmin", "admin", "dispatcher", "medical", "warehouse"]}>
+                                        <EmployeesPage />
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/devices"
+                                element={
+                                    <ProtectedRoute allowedRoles={["superadmin", "admin", "dispatcher", "medical", "warehouse"]}>
+                                        <DevicesPage />
+                                    </ProtectedRoute>
+                                }
+                            />
                             <Route path="/reports" element={<ReportsPage />} />
                             <Route path="/lamp-self-rescuer" element={<ToolsPage />} />
                             <Route path="/tools" element={<Navigate to="/lamp-self-rescuer" replace />} />
-                            <Route path="/user-management" element={<AdminUsersPage />} />
+                            <Route
+                                path="/user-management"
+                                element={
+                                    <ProtectedRoute allowedRoles={["superadmin", "admin", "dispatcher", "medical", "warehouse"]}>
+                                        <AdminUsersPage />
+                                    </ProtectedRoute>
+                                }
+                            />
                             <Route path="/admin/users" element={<Navigate to="/user-management" replace />} />
                         </Route>
                         <Route path="*" element={<Navigate to="/dashboard" replace />} />
