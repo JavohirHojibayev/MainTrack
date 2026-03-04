@@ -12,14 +12,14 @@ interface ThemeCtx {
 }
 
 const ThemeContext = createContext<ThemeCtx>({
-    mode: "dark",
-    tokens: darkTokens,
+    mode: "light",
+    tokens: lightTokens,
     toggleMode: () => { },
 });
 
 export function AppThemeProvider({ children }: { children: ReactNode }) {
     const [mode, setMode] = useState<Mode>(
-        () => (localStorage.getItem("minetrack_theme") as Mode) || "dark"
+        () => (localStorage.getItem("minetrack_theme") as Mode) || "light"
     );
 
     const toggleMode = useCallback(() => {

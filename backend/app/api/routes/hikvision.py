@@ -36,6 +36,7 @@ from app.models.device import Device, DeviceType
 from app.models.employee import Employee
 from app.models.employee_external_id import EmployeeExternalID
 from app.models.event import Event, EventStatus, EventType
+from app.models.user import User
 
 logger = logging.getLogger("hikvision.webhook")
 

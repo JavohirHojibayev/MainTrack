@@ -175,8 +175,10 @@ export default function DashboardPage() {
         });
     }, [dailyTools, normalizedSearch]);
 
-    const insideCount = dailySummary.filter((r) => Boolean(r.entered_today)).length;
-    const outsideCount = dailySummary.filter((r) => Boolean(r.exited_today)).length;
+    // KPI must match table total: count current state from last event (inside/outside),
+    // not "entered/exited at least once today" which can double-count one employee.
+    const insideCount = dailySummary.filter((r) => Boolean(r.is_inside)).length;
+    const outsideCount = dailySummary.filter((r) => !r.is_inside).length;
     const issuedCount = useMemo(
         () => new Set(dailyTools.filter((r) => Boolean(r.issued_at)).map((r) => r.employee_id)).size,
         [dailyTools]
