@@ -53,6 +53,20 @@ export async function fetchMedicalExams(params?: MedicalExamFilters): Promise<Me
     return apiClient.get("/medical/exams" + query);
 }
 
+export async function fetchMedicalExamJournal(params?: MedicalExamFilters): Promise<MedicalExam[]> {
+    let query = "";
+    if (params) {
+        const searchParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null && value !== "") {
+                searchParams.append(key, String(value));
+            }
+        });
+        query = "?" + searchParams.toString();
+    }
+    return apiClient.get("/medical/exams/journal" + query);
+}
+
 export async function fetchMedicalStats(targetDate?: string): Promise<MedicalStats> {
     const query = targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : "";
     return apiClient.get("/medical/stats" + query);

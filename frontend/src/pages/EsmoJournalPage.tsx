@@ -9,7 +9,7 @@ import LocalizedDateInput from "@/components/LocalizedDateInput";
 import StatusPill from "@/components/StatusPill";
 import { useAppTheme } from "@/context/ThemeContext";
 import { downloadXls } from "@/utils/exportXls";
-import { fetchMedicalExams, type MedicalExam } from "@/api/medical";
+import { fetchMedicalExamJournal, type MedicalExam } from "@/api/medical";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -48,12 +48,11 @@ export default function EsmoJournalPage() {
     const loadExams = useCallback(async () => {
         setLoading(true);
         try {
-            const data = await fetchMedicalExams({
+            const data = await fetchMedicalExamJournal({
                 start_date: appliedFilters.start_date || undefined,
                 end_date: appliedFilters.end_date || undefined,
                 search: appliedFilters.search.trim() || undefined,
                 limit: 5000,
-                latest_per_employee: false,
             });
             setRows(data);
         } catch (err) {

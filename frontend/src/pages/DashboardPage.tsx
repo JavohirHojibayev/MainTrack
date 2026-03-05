@@ -333,13 +333,13 @@ export default function DashboardPage() {
                         <GlassCard sx={{ width: "100%" }}>
                             <Typography variant="h6" sx={{ mb: 2, color: tokens.status.warning, fontWeight: 700 }}>{t("dashboard.toolDebts")}</Typography>
                             <TableContainer sx={{ maxHeight: 300, overflowY: "auto" }}>
-                                <Table size="small" stickyHeader>
+                                <Table size="small" stickyHeader sx={{ tableLayout: "fixed", width: "100%" }}>
                                     <TableHead>
                                         <TableRow>
-                                            <TableCell>{t("dashboard.employee")}</TableCell>
-                                            <TableCell>{t("dashboard.taken")}</TableCell>
-                                            <TableCell>{t("tools.col.returnedAt")}</TableCell>
-                                            <TableCell>{t("dashboard.status")}</TableCell>
+                                            <TableCell sx={{ width: "46%" }}>{t("dashboard.employee")}</TableCell>
+                                            <TableCell sx={{ width: "18%" }}>{t("dashboard.taken")}</TableCell>
+                                            <TableCell sx={{ width: "21%" }}>{t("tools.col.returnedAt")}</TableCell>
+                                            <TableCell sx={{ width: "15%" }}>{t("dashboard.status")}</TableCell>
                                         </TableRow>
                                     </TableHead>
                                     <TableBody>
@@ -354,7 +354,7 @@ export default function DashboardPage() {
                                                         </TableCell>
                                                         <TableCell>{fmt(r.issued_at)}</TableCell>
                                                         <TableCell>{fmt(r.returned_at)}</TableCell>
-                                                        <TableCell>
+                                                        <TableCell sx={{ width: "15%" }}>
                                                             {colorStatus ? (
                                                                 <StatusPill status={formatToolStatus(r.status)} colorStatus={colorStatus} />
                                                             ) : (

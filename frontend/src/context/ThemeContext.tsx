@@ -4,6 +4,26 @@ import { buildTheme } from "@/theme";
 import { darkTokens, lightTokens, type ThemeTokens } from "@/theme/tokens";
 
 type Mode = "light" | "dark";
+const THEME_KEY = "minetrack_theme";
+const THEME_INIT_KEY = "minetrack_theme_initialized";
+
+function resolveInitialMode(): Mode {
+    if (typeof window === "undefined") return "light";
+
+    const initialized = localStorage.getItem(THEME_INIT_KEY) === "1";
+    const stored = localStorage.getItem(THEME_KEY);
+
+    // Migration-safe first run: force default day/light once.
+    if (!initialized) {
+        localStorage.setItem(THEME_KEY, "light");
+        localStorage.setItem(THEME_INIT_KEY, "1");
+        return "light";
+    }
+
+    if (stored === "light" || stored === "dark") return stored;
+    localStorage.setItem(THEME_KEY, "light");
+    return "light";
+}
 
 interface ThemeCtx {
     mode: Mode;
@@ -19,13 +39,14 @@ const ThemeContext = createContext<ThemeCtx>({
 
 export function AppThemeProvider({ children }: { children: ReactNode }) {
     const [mode, setMode] = useState<Mode>(
-        () => (localStorage.getItem("minetrack_theme") as Mode) || "light"
+        () => resolveInitialMode()
     );
 
     const toggleMode = useCallback(() => {
         setMode((prev) => {
             const next = prev === "dark" ? "light" : "dark";
-            localStorage.setItem("minetrack_theme", next);
+            localStorage.setItem(THEME_KEY, next);
+            localStorage.setItem(THEME_INIT_KEY, "1");
             return next;
         });
     }, []);

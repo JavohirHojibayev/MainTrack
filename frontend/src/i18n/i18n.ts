@@ -6,7 +6,7 @@ import en from "./locales/en/translation.json";
 import ru from "./locales/ru/translation.json";
 import uz from "./locales/uz/translation.json";
 
-const saved = localStorage.getItem("minetrack_lang") || "en";
+const saved = localStorage.getItem("minetrack_lang") || "uz";
 
 i18n
     .use(LanguageDetector)
@@ -18,7 +18,7 @@ i18n
             uz: { translation: uz },
         },
         lng: saved,
-        fallbackLng: "en",
+        fallbackLng: "uz",
         interpolation: { escapeValue: false },
         detection: { order: ["localStorage"], lookupLocalStorage: "minetrack_lang", caches: ["localStorage"] },
     });

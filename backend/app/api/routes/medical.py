@@ -271,6 +271,49 @@ def get_medical_exams(
     rows = query.offset(skip).limit(limit).all()
     return _serialize_medical_exams(db, rows)
 
+
+@router.get("/exams/journal", response_model=list[MedicalExamRead])
+def get_medical_exams_journal(
+    db: Session = Depends(deps.get_db),
+    skip: int = 0,
+    limit: int = 5000,
+    employee_id: Optional[int] = None,
+    result: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    search: Optional[str] = None,
+):
+    """
+    ESMO Journal data source:
+    return all exam attempts as-is (no per-employee deduplication).
+    """
+    query = (
+        db.query(MedicalExam)
+        .options(joinedload(MedicalExam.employee))
+        .filter(MedicalExam.terminal_name.in_(get_allowed_esmo_terminal_names()))
+    )
+
+    if employee_id:
+        query = query.filter(MedicalExam.employee_id == employee_id)
+    if result:
+        query = query.filter(MedicalExam.result == result)
+    if start_date:
+        start_local, _ = _local_day_bounds(start_date)
+        query = query.filter(MedicalExam.timestamp >= start_local)
+    if end_date:
+        _, end_local = _local_day_bounds(end_date)
+        query = query.filter(MedicalExam.timestamp < end_local)
+    if search:
+        query = _apply_exam_search(query, search)
+
+    rows = (
+        query.order_by(MedicalExam.timestamp.desc(), MedicalExam.esmo_id.desc().nullslast(), MedicalExam.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return _serialize_medical_exams(db, rows)
+
 @router.get("/stats")
 def get_medical_stats(
     db: Session = Depends(deps.get_db),
