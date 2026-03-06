@@ -290,7 +290,7 @@ export default function DashboardPage() {
                                     {filteredSummary
                                         .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                                         .map((r) => (
-                                            <TableRow key={r.employee_no} hover>
+                                            <TableRow key={`${r.employee_id}-${r.employee_no}`} hover>
                                                 <TableCell sx={{ width: 130 }}>{formatEmployeeNo(r.employee_no)}</TableCell>
                                                 <TableCell sx={{ width: "36%", maxWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                                     {r.full_name}

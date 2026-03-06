@@ -81,6 +81,26 @@ def _employee_short_name(employee: Employee) -> str:
     return _normalize_name(f"{employee.last_name} {employee.first_name}")
 
 
+def _is_payload_name_compatible(employee: Employee, payload_name: str | None) -> bool:
+    normalized_payload = _normalize_name(payload_name)
+    if not normalized_payload:
+        return True
+
+    last_first = _normalize_name(f"{employee.last_name} {employee.first_name}")
+    first_last = _normalize_name(f"{employee.first_name} {employee.last_name}")
+    if last_first and last_first in normalized_payload:
+        return True
+    if first_last and first_last in normalized_payload:
+        return True
+
+    payload_parts = normalized_payload.split()
+    if len(payload_parts) < 2:
+        return False
+    return payload_parts[0] == (last_first.split()[0] if last_first else "") and payload_parts[1] == (
+        last_first.split()[1] if len(last_first.split()) > 1 else ""
+    )
+
+
 def _find_employee_by_name(db: Session, payload_name: str) -> Employee | None:
     normalized = _normalize_name(payload_name)
     if not normalized:
@@ -103,8 +123,6 @@ def _find_employee_by_name(db: Session, payload_name: str) -> Employee | None:
     exact = [c for c in candidates if _employee_short_name(c) == f"{last_part} {first_part}"]
     if len(exact) == 1:
         return exact[0]
-    if len(candidates) == 1:
-        return candidates[0]
     return None
 
 
@@ -208,30 +226,22 @@ def _find_employee_by_hikvision_id(
     then falls back to employee_no match only when name validation passes.
     Mine devices use name-based mapping to avoid ID-domain collisions.
     """
-    normalized_payload_name = _normalize_name(payload_name)
-
     # Mine turnstiles have their own ID domain.
     # They must use explicit EmployeeExternalID mapping, never name-based runtime matching.
     if host in MINE_HOSTS:
         employee = find_employee_by_external_id(db, HIKVISION_MINE_SYSTEM, employee_no)
-        if employee:
-            return employee
-        logger.warning(
-            "[%s] Mine EmployeeExternalID mapping missing: employee_no=%s payload_name=%s system=%s",
-            host,
-            employee_no,
-            payload_name,
-            HIKVISION_MINE_SYSTEM,
-        )
-        return None
-
-    # Non-mine: external ID lookup first.
-    system = external_system_for_host(host) or HIKVISION_SYSTEM
-    employee = find_employee_by_external_id(db, system, employee_no)
-    if employee and normalized_payload_name:
-        if _employee_short_name(employee) not in normalized_payload_name:
-            logger.debug(
-                "[%s] HIKVISION external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+        if not employee:
+            logger.warning(
+                "[%s] Mine EmployeeExternalID mapping missing: employee_no=%s payload_name=%s system=%s",
+                host,
+                employee_no,
+                payload_name,
+                HIKVISION_MINE_SYSTEM,
+            )
+            return None
+        if payload_name and not _is_payload_name_compatible(employee, payload_name):
+            logger.warning(
+                "[%s] Mine mapping name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
                 host,
                 employee_no,
                 payload_name,
@@ -239,6 +249,29 @@ def _find_employee_by_hikvision_id(
                 employee.first_name,
             )
             return None
+        return employee
+
+    # Non-mine: external ID lookup first.
+    system = external_system_for_host(host) or HIKVISION_SYSTEM
+    employee = find_employee_by_external_id(db, system, employee_no)
+    if employee and str(employee.employee_no or "").upper().startswith("MINE-"):
+        logger.warning(
+            "[%s] Cross-domain mapping blocked: employee_no=%s mapped_internal=%s",
+            host,
+            employee_no,
+            employee.employee_no,
+        )
+        return None
+    if employee and not _is_payload_name_compatible(employee, payload_name):
+        logger.debug(
+            "[%s] HIKVISION external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+            host,
+            employee_no,
+            payload_name,
+            employee.last_name,
+            employee.first_name,
+        )
+        return None
     if employee:
         return employee
 
@@ -246,8 +279,16 @@ def _find_employee_by_hikvision_id(
     employee = db.query(Employee).filter(Employee.employee_no == employee_no).first()
     if not employee:
         return None
+    if str(employee.employee_no or "").upper().startswith("MINE-"):
+        logger.warning(
+            "[%s] Cross-domain fallback blocked: employee_no=%s mapped_internal=%s",
+            host,
+            employee_no,
+            employee.employee_no,
+        )
+        return None
 
-    if normalized_payload_name and _employee_short_name(employee) not in normalized_payload_name:
+    if not _is_payload_name_compatible(employee, payload_name):
         by_name = _find_employee_by_name(db, payload_name)
         if by_name:
             return by_name

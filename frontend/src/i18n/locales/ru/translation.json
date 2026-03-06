@@ -251,9 +251,9 @@
                    "duplicate":  "Дубликат",
                    "error":  "Ошибка",
                    "fail":  "Ошибка",
-                   "passed":  "passed",
-                   "failed":  "failed",
-                   "review":  "review"
+                   "passed":  "Пройден",
+                   "failed":  "Не пройден",
+                   "review":  "Повторный осмотр"
                },
     "common":  {
                    "noData":  "-",

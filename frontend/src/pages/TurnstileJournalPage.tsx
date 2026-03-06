@@ -28,7 +28,7 @@ export default function TurnstileJournalPage() {
     const { tokens } = useAppTheme();
     const [rows, setRows] = useState<EventRow[]>([]);
     const [loading, setLoading] = useState(false);
-    const [filters, setFilters] = useState<EventFilters>({ turnstile_only: true });
+    const [filters, setFilters] = useState<EventFilters>({ turnstile_only: true, status: "ACCEPTED" });
     const [rowCount, setRowCount] = useState(0);
     const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
     const dedupeWindowMs = 20 * 1000;

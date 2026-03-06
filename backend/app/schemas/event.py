@@ -78,6 +78,19 @@ class EventOut(BaseModel):
                     "status": data.status,
                     "reject_reason": data.reject_reason,
                 }
+
+                source_payload = getattr(data, "source_payload", None) or {}
+                payload_employee_no = str(source_payload.get("employeeNoString") or source_payload.get("cardNo") or "").strip()
+                payload_name = str(source_payload.get("name") or "").strip()
+                event_type_value = (
+                    data.event_type.value if hasattr(data.event_type, "value") else str(data.event_type)
+                )
+                is_turnstile_event = event_type_value in {
+                    "TURNSTILE_IN",
+                    "TURNSTILE_OUT",
+                    "MINE_IN",
+                    "MINE_OUT",
+                }
                 
                 # Flatten Employee
                 if hasattr(data, "employee") and data.employee:
@@ -85,6 +98,14 @@ class EventOut(BaseModel):
                     obj_dict["first_name"] = data.employee.first_name
                     obj_dict["last_name"] = data.employee.last_name
                     obj_dict["patronymic"] = data.employee.patronymic
+
+                # For turnstile-like events, show raw device identity to avoid cross-domain ID confusion.
+                if is_turnstile_event and payload_employee_no:
+                    obj_dict["employee_no"] = payload_employee_no
+                if is_turnstile_event and payload_name:
+                    obj_dict["last_name"] = payload_name
+                    obj_dict["first_name"] = None
+                    obj_dict["patronymic"] = None
                 
                 # Flatten Device
                 if hasattr(data, "device") and data.device:

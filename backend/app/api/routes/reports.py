@@ -108,6 +108,12 @@ def _format_employee_no(value: str | None, min_len: int = 8) -> str:
     return normalized.zfill(min_len)
 
 
+def _payload_employee_no(source_payload: dict | None) -> str:
+    if not isinstance(source_payload, dict):
+        return ""
+    return str(source_payload.get("employeeNoString") or source_payload.get("cardNo") or "").strip()
+
+
 def _latest_esmo_exam_today(db: Session, employee_id: int) -> MedicalExam | None:
     today = _current_local_day()
     start_local, end_local = _local_day_bounds(today)
@@ -751,9 +757,13 @@ def daily_mine_summary(
                 "is_inside": False,
                 "has_in_today": False,
                 "has_out_today": False,
+                "display_employee_no": "",
             }
 
         entry = summary[emp_id]
+        payload_no = _payload_employee_no(ev.source_payload)
+        if payload_no:
+            entry["display_employee_no"] = payload_no
 
         normalized_is_in: bool
         if device_host in TURNSTILE_IN_HOSTS:
@@ -809,7 +819,7 @@ def daily_mine_summary(
         result.append(
             MineWorkSummaryItem(
                 employee_id=emp.id,
-                employee_no=emp.employee_no,
+                employee_no=(data.get("display_employee_no") or emp.employee_no),
                 full_name=full_name,
                 total_minutes=max(session_minutes, 0),
                 last_in=last_in,

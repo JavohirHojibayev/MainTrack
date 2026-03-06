@@ -133,6 +133,26 @@ def _employee_short_name(employee: Employee) -> str:
     return _normalize_name(f"{employee.last_name} {employee.first_name}")
 
 
+def _is_payload_name_compatible(employee: Employee, payload_name: str | None) -> bool:
+    normalized_payload = _normalize_name(payload_name)
+    if not normalized_payload:
+        return True
+
+    last_first = _normalize_name(f"{employee.last_name} {employee.first_name}")
+    first_last = _normalize_name(f"{employee.first_name} {employee.last_name}")
+    if last_first and last_first in normalized_payload:
+        return True
+    if first_last and first_last in normalized_payload:
+        return True
+
+    payload_parts = normalized_payload.split()
+    if len(payload_parts) < 2:
+        return False
+    return payload_parts[0] == (last_first.split()[0] if last_first else "") and payload_parts[1] == (
+        last_first.split()[1] if len(last_first.split()) > 1 else ""
+    )
+
+
 def _find_employee_by_name(db, payload_name: str) -> Employee | None:
     normalized = _normalize_name(payload_name)
     if not normalized:
@@ -154,8 +174,6 @@ def _find_employee_by_name(db, payload_name: str) -> Employee | None:
     exact = [c for c in candidates if _employee_short_name(c) == f"{last_part} {first_part}"]
     if len(exact) == 1:
         return exact[0]
-    if len(candidates) == 1:
-        return candidates[0]
     return None
 
 
@@ -164,27 +182,20 @@ def _find_employee(db, employee_no: str, payload_name: str, ip_address: str) -> 
     if not employee_no:
         return None
 
-    normalized_payload_name = _normalize_name(payload_name)
-
     if ip_address in MINE_HOSTS:
         employee = find_employee_by_external_id(db, HIKVISION_MINE_SYSTEM, employee_no)
-        if employee:
-            return employee
-        logger.warning(
-            "[%s] Webhook mine mapping missing: employee_no=%s payload_name=%s system=%s",
-            ip_address,
-            employee_no,
-            payload_name,
-            HIKVISION_MINE_SYSTEM,
-        )
-        return None
-
-    system = external_system_for_host(ip_address) or HIKVISION_SYSTEM
-    employee = find_employee_by_external_id(db, system, employee_no)
-    if employee and normalized_payload_name:
-        if _employee_short_name(employee) not in normalized_payload_name:
-            logger.debug(
-                "[%s] Webhook external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+        if not employee:
+            logger.warning(
+                "[%s] Webhook mine mapping missing: employee_no=%s payload_name=%s system=%s",
+                ip_address,
+                employee_no,
+                payload_name,
+                HIKVISION_MINE_SYSTEM,
+            )
+            return None
+        if payload_name and not _is_payload_name_compatible(employee, payload_name):
+            logger.warning(
+                "[%s] Webhook mine mapping name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
                 ip_address,
                 employee_no,
                 payload_name,
@@ -192,6 +203,28 @@ def _find_employee(db, employee_no: str, payload_name: str, ip_address: str) -> 
                 employee.first_name,
             )
             return None
+        return employee
+
+    system = external_system_for_host(ip_address) or HIKVISION_SYSTEM
+    employee = find_employee_by_external_id(db, system, employee_no)
+    if employee and str(employee.employee_no or "").upper().startswith("MINE-"):
+        logger.warning(
+            "[%s] Webhook cross-domain mapping blocked: employee_no=%s mapped_internal=%s",
+            ip_address,
+            employee_no,
+            employee.employee_no,
+        )
+        return None
+    if employee and not _is_payload_name_compatible(employee, payload_name):
+        logger.debug(
+            "[%s] Webhook external_id name mismatch: employee_no=%s payload_name=%s mapped=%s %s",
+            ip_address,
+            employee_no,
+            payload_name,
+            employee.last_name,
+            employee.first_name,
+        )
+        return None
     if employee:
         return employee
 
@@ -199,7 +232,15 @@ def _find_employee(db, employee_no: str, payload_name: str, ip_address: str) -> 
     employee = db.query(Employee).filter(Employee.employee_no == employee_no).first()
     if not employee:
         return None
-    if normalized_payload_name and _employee_short_name(employee) not in normalized_payload_name:
+    if str(employee.employee_no or "").upper().startswith("MINE-"):
+        logger.warning(
+            "[%s] Webhook cross-domain fallback blocked: employee_no=%s mapped_internal=%s",
+            ip_address,
+            employee_no,
+            employee.employee_no,
+        )
+        return None
+    if not _is_payload_name_compatible(employee, payload_name):
         by_name = _find_employee_by_name(db, payload_name)
         if by_name:
             return by_name
@@ -213,6 +254,120 @@ def _find_employee(db, employee_no: str, payload_name: str, ip_address: str) -> 
         )
         return None
     return employee
+
+
+def _load_mine_devices_from_settings() -> tuple[list[dict], str | None]:
+    try:
+        devices = json.loads(settings.HIKVISION_DEVICES)
+    except Exception:
+        return [], "Invalid device config"
+    mine_devices = [d for d in (devices or []) if str(d.get("host", "")).strip() in MINE_HOSTS]
+    if not mine_devices:
+        return [], "No mine devices configured"
+    return mine_devices, None
+
+
+def _collect_mine_turnstile_users(mine_devices: list[dict]) -> tuple[list[dict[str, str]], int, list[str]]:
+    from app.core.hikvision_client import HikvisionClient
+
+    collected: list[dict[str, str]] = []
+    scanned_users = 0
+    unreachable: list[str] = []
+    for device_conf in mine_devices:
+        host = str(device_conf.get("host", "")).strip()
+        client = HikvisionClient(
+            host=host,
+            user=settings.HIKVISION_USER,
+            password=settings.HIKVISION_PASS,
+        )
+        if not client.check_connection():
+            unreachable.append(host)
+            continue
+
+        users = client.fetch_all_users()
+        for user_data in users:
+            scanned_users += 1
+            raw_external = str(user_data.get("employeeNo", "")).strip()
+            external_id = normalize_external_id(raw_external)
+            if not external_id:
+                continue
+            collected.append(
+                {
+                    "host": host,
+                    "external_id": external_id,
+                    "name": str(user_data.get("name", "")).strip(),
+                }
+            )
+    return collected, scanned_users, unreachable
+
+
+def _split_name_parts(full_name: str) -> tuple[str, str, str]:
+    parts = [p.strip() for p in (full_name or "").split() if p.strip()]
+    if not parts:
+        return "Unknown", "Mine", ""
+    if len(parts) == 1:
+        return parts[0], "Mine", ""
+    last_name = parts[0]
+    first_name = parts[1]
+    patronymic = " ".join(parts[2:]) if len(parts) > 2 else ""
+    return last_name, first_name, patronymic
+
+
+def _generate_unique_mine_employee_no(db, external_id: str) -> str:
+    normalized = normalize_external_id(external_id)
+    base = f"MINE-{normalized or 'UNKNOWN'}"
+    base = base[:32]
+    candidate = base
+    suffix = 1
+    while db.query(Employee).filter(Employee.employee_no == candidate).first():
+        tail = f"-{suffix}"
+        candidate = (base[: max(1, 32 - len(tail))] + tail)[:32]
+        suffix += 1
+    return candidate
+
+
+def _create_mine_employee(db, external_id: str, full_name: str) -> Employee:
+    last_name, first_name, patronymic = _split_name_parts(full_name)
+    employee = Employee(
+        employee_no=_generate_unique_mine_employee_no(db, external_id),
+        first_name=first_name,
+        last_name=last_name,
+        patronymic=patronymic,
+        position="Auto-created from mine turnstile",
+        department="Mine Turnstile",
+        is_active=True,
+    )
+    db.add(employee)
+    db.flush()
+    return employee
+
+
+def _resolve_employee_for_mine_external(
+    db,
+    external_id: str,
+    full_name: str,
+    create_if_missing: bool,
+    prefer_existing_mapping: bool,
+) -> tuple[Employee | None, str]:
+    normalized_external = normalize_external_id(external_id)
+    if not normalized_external:
+        return None, "empty_external"
+
+    if prefer_existing_mapping:
+        mapped = find_employee_by_external_id(db, HIKVISION_MINE_SYSTEM, normalized_external)
+        if mapped:
+            return mapped, "mapped"
+
+    if prefer_existing_mapping:
+        mapped = find_employee_by_external_id(db, HIKVISION_MINE_SYSTEM, normalized_external)
+        if mapped:
+            return mapped, "mapped_name_mismatch"
+
+    if not create_if_missing:
+        return None, "unresolved"
+
+    created = _create_mine_employee(db, normalized_external, full_name)
+    return created, "created_missing_employee"
 
 
 def _flatten_hikvision_json(data: dict) -> dict:
@@ -410,16 +565,24 @@ def hikvision_webhook(request: Request, body: bytes = Body(...)) -> Response:
         logger.debug("Ignoring non-access event: %s", event_data.get("eventType"))
         return Response(status_code=200, content="OK")
 
-    request_ip = request.client.host if request.client else ""
+    request_ip = (request.client.host if request.client else "").strip()
     payload_ip = str(event_data.get("ipAddress", "")).strip()
-    ip_address = payload_ip or request_ip
-    if payload_ip and request_ip and payload_ip != request_ip:
+    if request_ip and payload_ip and payload_ip != request_ip:
         logger.warning(
             "Webhook source mismatch: request_ip=%s payload_ip=%s raw_id_hint=%s",
             request_ip,
             payload_ip,
             event_data.get("serialNo", ""),
         )
+    known_request = bool(request_ip and request_ip in DEVICE_IP_MAP)
+    known_payload = bool(payload_ip and payload_ip in DEVICE_IP_MAP)
+    # Trust payload_ip first when available: request_ip can be a relay/proxy.
+    if known_payload:
+        ip_address = payload_ip
+    elif known_request:
+        ip_address = request_ip
+    else:
+        ip_address = request_ip or payload_ip
     if ip_address and ip_address not in DEVICE_IP_MAP:
         logger.warning("Ignoring webhook from unknown IP: %s (request_ip=%s)", ip_address, request_ip)
         return Response(status_code=200, content="OK")
@@ -595,6 +758,7 @@ def hikvision_status(_: Any = Depends(get_current_user)) -> dict:
 
 @router.post("/sync-mine-id-mappings")
 def sync_mine_id_mappings(
+    create_missing_employees: bool = Query(default=True),
     current_user: Any = Depends(get_current_user),
 ) -> dict:
     """
@@ -606,61 +770,294 @@ def sync_mine_id_mappings(
     if current_user.role not in ("superadmin", "admin", "dispatcher"):
         return Response(status_code=403, content="Not authorized")
 
-    try:
-        devices = json.loads(settings.HIKVISION_DEVICES)
-    except Exception:
-        return {"success": False, "message": "Invalid device config"}
-
-    mine_devices = [d for d in (devices or []) if str(d.get("host", "")).strip() in MINE_HOSTS]
-    if not mine_devices:
-        return {"success": False, "message": "No mine devices configured"}
-
-    from app.core.hikvision_client import HikvisionClient
+    mine_devices, error_message = _load_mine_devices_from_settings()
+    if error_message:
+        return {"success": False, "message": error_message}
 
     db = SessionLocal()
-    scanned_users = 0
+    collected, scanned_users, unreachable = _collect_mine_turnstile_users(mine_devices)
     created = 0
     updated = 0
     unchanged = 0
     unresolved = 0
     conflicts = 0
-    unreachable: list[str] = []
+    target_conflicts = 0
+    target_conflicts_resolved = 0
+    created_employees = 0
     unresolved_samples: list[dict[str, str]] = []
+    target_conflict_samples: list[dict[str, Any]] = []
 
     try:
-        for device_conf in mine_devices:
-            host = str(device_conf.get("host", "")).strip()
-            client = HikvisionClient(
-                host=host,
-                user=settings.HIKVISION_USER,
-                password=settings.HIKVISION_PASS,
+        source_by_external: dict[str, dict[str, str]] = {}
+        for item in collected:
+            external_id = item["external_id"]
+            current = source_by_external.get(external_id)
+            if not current:
+                source_by_external[external_id] = item
+                continue
+            if not current.get("name") and item.get("name"):
+                source_by_external[external_id] = item
+
+        candidate_pairs: list[tuple[str, Employee, str, str]] = []
+        for item in source_by_external.values():
+            host = item["host"]
+            external_id = item["external_id"]
+            full_name = item["name"]
+
+            employee, resolve_mode = _resolve_employee_for_mine_external(
+                db,
+                external_id=external_id,
+                full_name=full_name,
+                create_if_missing=create_missing_employees,
+                prefer_existing_mapping=True,
             )
-            if not client.check_connection():
-                unreachable.append(host)
+            if resolve_mode == "created_missing_employee":
+                created_employees += 1
+            if not employee:
+                unresolved += 1
+                if len(unresolved_samples) < 100:
+                    unresolved_samples.append(
+                        {
+                            "host": host,
+                            "external_id": external_id,
+                            "name": full_name,
+                        }
+                    )
                 continue
 
-            users = client.fetch_all_users()
-            for user_data in users:
-                scanned_users += 1
-                raw_external = str(user_data.get("employeeNo", "")).strip()
-                external_id = normalize_external_id(raw_external)
-                full_name = str(user_data.get("name", "")).strip()
-                if not external_id:
-                    continue
+            candidate_pairs.append((external_id, employee, full_name, host))
 
-                employee = _find_employee_by_name(db, full_name)
-                if not employee:
-                    unresolved += 1
-                    if len(unresolved_samples) < 100:
-                        unresolved_samples.append(
-                            {
-                                "host": host,
-                                "external_id": external_id,
-                                "name": full_name,
-                            }
-                        )
-                    continue
+        owner_by_employee: dict[int, str] = {}
+        resolved_pairs: list[tuple[str, Employee, str, str]] = []
+        for external_id, employee, full_name, host in sorted(candidate_pairs, key=lambda x: x[0]):
+            employee_id = int(employee.id)
+            existing_ext = owner_by_employee.get(employee_id)
+            if not existing_ext:
+                owner_by_employee[employee_id] = external_id
+                resolved_pairs.append((external_id, employee, full_name, host))
+                continue
 
+            target_conflicts += 1
+            if len(target_conflict_samples) < 100:
+                target_conflict_samples.append(
+                    {
+                        "employee_id": employee_id,
+                        "existing_external_id": existing_ext,
+                        "new_external_id": external_id,
+                        "name": full_name,
+                    }
+                )
+            if create_missing_employees:
+                shadow = _create_mine_employee(db, external_id, full_name)
+                created_employees += 1
+                resolved_pairs.append((external_id, shadow, full_name, host))
+                target_conflicts_resolved += 1
+            else:
+                unresolved += 1
+                if len(unresolved_samples) < 100:
+                    unresolved_samples.append(
+                        {
+                            "host": host,
+                            "external_id": external_id,
+                            "name": full_name,
+                        }
+                    )
+
+        for external_id, employee, _full_name, _host in resolved_pairs:
+            status = upsert_employee_external_id(
+                db,
+                employee_id=int(employee.id),
+                system=HIKVISION_MINE_SYSTEM,
+                external_id=external_id,
+            )
+            if status == "created":
+                created += 1
+            elif status == "updated":
+                updated += 1
+            elif status == "unchanged":
+                unchanged += 1
+            elif status == "conflict_external_taken":
+                conflicts += 1
+
+        db.commit()
+
+        return {
+            "success": True,
+            "system": HIKVISION_MINE_SYSTEM,
+            "devices": [str(d.get("host", "")).strip() for d in mine_devices],
+            "unreachable": unreachable,
+            "scanned_users": scanned_users,
+            "created_employees": created_employees,
+            "created": created,
+            "updated": updated,
+            "unchanged": unchanged,
+            "conflicts": conflicts,
+            "target_conflicts": target_conflicts,
+            "target_conflicts_resolved": target_conflicts_resolved,
+            "unresolved": unresolved,
+            "target_conflict_samples": target_conflict_samples,
+            "unresolved_samples": unresolved_samples,
+        }
+    except Exception as exc:
+        db.rollback()
+        logger.error("Mine mapping sync failed: %s", exc)
+        return {"success": False, "message": str(exc)}
+    finally:
+        db.close()
+
+
+@router.post("/rebuild-mine-id-mappings")
+def rebuild_mine_id_mappings(
+    dry_run: bool = Query(default=False),
+    full_reset: bool = Query(default=True),
+    create_missing_employees: bool = Query(default=True),
+    current_user: Any = Depends(get_current_user),
+) -> dict:
+    """
+    Rebuild strict mine turnstile EmployeeExternalID mappings with safety rules.
+    - Reads source IDs from mine devices only.
+    - Uses unique name matching to resolve employee.
+    - Rejects ambiguous source (same external_id -> multiple names).
+    - Rejects ambiguous target (same employee -> multiple external_id).
+    """
+    if current_user.role not in ("superadmin", "admin", "dispatcher"):
+        return Response(status_code=403, content="Not authorized")
+
+    mine_devices, error_message = _load_mine_devices_from_settings()
+    if error_message:
+        return {"success": False, "message": error_message}
+
+    collected, scanned_users, unreachable = _collect_mine_turnstile_users(mine_devices)
+    db = SessionLocal()
+    try:
+        grouped: dict[str, dict[str, Any]] = {}
+        for item in collected:
+            external_id = item["external_id"]
+            name_raw = (item["name"] or "").strip()
+            host = item["host"]
+            entry = grouped.setdefault(
+                external_id,
+                {"hosts": set(), "names_norm": set(), "names_raw": set(), "name_counts": {}},
+            )
+            entry["hosts"].add(host)
+            if name_raw:
+                normalized_name = _normalize_name(name_raw)
+                entry["names_raw"].add(name_raw)
+                entry["names_norm"].add(normalized_name)
+                entry["name_counts"][normalized_name] = int(entry["name_counts"].get(normalized_name, 0)) + 1
+
+        source_name_conflicts = 0
+        source_name_conflicts_resolved = 0
+        source_name_conflict_samples: list[dict[str, Any]] = []
+        unresolved = 0
+        unresolved_samples: list[dict[str, Any]] = []
+        candidate_pairs: list[tuple[str, Employee, str]] = []
+        created_employees = 0
+
+        for external_id in sorted(grouped.keys()):
+            info = grouped[external_id]
+            names_norm = {n for n in info["names_norm"] if n}
+            names_raw = sorted(info["names_raw"])
+            hosts = sorted(info["hosts"])
+
+            selected_name = names_raw[0] if names_raw else ""
+            if info["name_counts"]:
+                selected_norm = max(info["name_counts"].items(), key=lambda kv: kv[1])[0]
+                preferred = [raw for raw in names_raw if _normalize_name(raw) == selected_norm]
+                if preferred:
+                    selected_name = preferred[0]
+
+            had_source_conflict = len(names_norm) > 1
+            if had_source_conflict:
+                source_name_conflicts += 1
+                if len(source_name_conflict_samples) < 100:
+                    source_name_conflict_samples.append(
+                        {
+                            "external_id": external_id,
+                            "hosts": hosts,
+                            "names": names_raw[:10],
+                            "picked_name": selected_name,
+                        }
+                    )
+                if create_missing_employees:
+                    source_name_conflicts_resolved += 1
+
+            employee, resolve_mode = _resolve_employee_for_mine_external(
+                db,
+                external_id=external_id,
+                full_name=selected_name,
+                create_if_missing=create_missing_employees,
+                prefer_existing_mapping=not full_reset,
+            )
+            if resolve_mode == "created_missing_employee":
+                created_employees += 1
+            if not employee:
+                unresolved += 1
+                if len(unresolved_samples) < 100:
+                    unresolved_samples.append(
+                        {
+                            "external_id": external_id,
+                            "hosts": hosts,
+                            "name": selected_name,
+                        }
+                    )
+                continue
+            candidate_pairs.append((external_id, employee, selected_name))
+
+        # One employee cannot hold multiple external IDs in current schema.
+        target_conflicts = 0
+        target_conflicts_resolved = 0
+        target_conflict_samples: list[dict[str, Any]] = []
+        resolved_pairs: list[tuple[str, Employee]] = []
+        owner_by_employee: dict[int, str] = {}
+        for external_id, employee, selected_name in candidate_pairs:
+            employee_id = int(employee.id)
+            existing_ext = owner_by_employee.get(employee_id)
+            if not existing_ext:
+                owner_by_employee[employee_id] = external_id
+                resolved_pairs.append((external_id, employee))
+                continue
+
+            target_conflicts += 1
+            if len(target_conflict_samples) < 100:
+                target_conflict_samples.append(
+                    {
+                        "employee_id": employee_id,
+                        "external_ids": sorted([existing_ext, external_id]),
+                        "employee_name": f"{employee.last_name} {employee.first_name}".strip(),
+                    }
+                )
+
+            if create_missing_employees:
+                shadow = _create_mine_employee(db, external_id, selected_name)
+                created_employees += 1
+                resolved_pairs.append((external_id, shadow))
+                target_conflicts_resolved += 1
+            else:
+                unresolved += 1
+
+        existing_rows = (
+            db.query(EmployeeExternalID)
+            .filter(EmployeeExternalID.system == HIKVISION_MINE_SYSTEM)
+            .all()
+        )
+        existing_count = len(existing_rows)
+
+        created = 0
+        updated = 0
+        unchanged = 0
+        conflicts = 0
+        removed = 0
+
+        if not dry_run:
+            if full_reset:
+                removed = (
+                    db.query(EmployeeExternalID)
+                    .filter(EmployeeExternalID.system == HIKVISION_MINE_SYSTEM)
+                    .delete(synchronize_session=False)
+                )
+
+            for external_id, employee in resolved_pairs:
                 status = upsert_employee_external_id(
                     db,
                     employee_id=int(employee.id),
@@ -675,25 +1072,59 @@ def sync_mine_id_mappings(
                     unchanged += 1
                 elif status == "conflict_external_taken":
                     conflicts += 1
-
-        db.commit()
+            db.commit()
+        else:
+            by_external = {str(row.external_id): int(row.employee_id) for row in existing_rows}
+            by_employee = {int(row.employee_id): str(row.external_id) for row in existing_rows}
+            removed = existing_count if full_reset else 0
+            if full_reset:
+                created = len(resolved_pairs)
+            else:
+                for external_id, employee in resolved_pairs:
+                    employee_id = int(employee.id)
+                    owner = by_external.get(external_id)
+                    prev_ext = by_employee.get(employee_id)
+                    if owner is not None and owner != employee_id:
+                        conflicts += 1
+                    elif owner == employee_id and prev_ext == external_id:
+                        unchanged += 1
+                    elif prev_ext and prev_ext != external_id:
+                        updated += 1
+                    elif owner == employee_id:
+                        unchanged += 1
+                    else:
+                        created += 1
 
         return {
             "success": True,
+            "dry_run": dry_run,
+            "full_reset": full_reset,
+            "create_missing_employees": create_missing_employees,
             "system": HIKVISION_MINE_SYSTEM,
             "devices": [str(d.get("host", "")).strip() for d in mine_devices],
             "unreachable": unreachable,
             "scanned_users": scanned_users,
+            "collected_rows": len(collected),
+            "distinct_external_ids": len(grouped),
+            "resolved": len(resolved_pairs),
+            "created_employees": created_employees,
             "created": created,
             "updated": updated,
             "unchanged": unchanged,
+            "removed": removed,
             "conflicts": conflicts,
+            "source_name_conflicts": source_name_conflicts,
+            "source_name_conflicts_resolved": source_name_conflicts_resolved,
+            "target_conflicts": target_conflicts,
+            "target_conflicts_resolved": target_conflicts_resolved,
             "unresolved": unresolved,
+            "source_name_conflict_samples": source_name_conflict_samples,
+            "target_conflict_samples": target_conflict_samples,
             "unresolved_samples": unresolved_samples,
         }
     except Exception as exc:
         db.rollback()
-        logger.error("Mine mapping sync failed: %s", exc)
+        logger.error("Mine mapping rebuild failed: %s", exc)
         return {"success": False, "message": str(exc)}
     finally:
         db.close()

@@ -36,6 +36,7 @@ export async function fetchBlockedAttemptsCount(day?: string): Promise<number> {
 }
 
 export interface DailySummaryRow {
+    employee_id: number;
     employee_no: string;
     full_name: string;
     total_minutes: number;
