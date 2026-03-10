@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -14,6 +15,8 @@ from app.db.session import SessionLocal
 from app.models.medical_exam import MedicalExam
 
 logger = logging.getLogger("esmo.monitoring")
+
+_ALLOWED_SLOT_IDS = {"7", "8", "9", "10"}
 
 
 _lock = threading.Lock()
@@ -123,9 +126,31 @@ def _query_portal_latest_ids(n: int, max_pages: int) -> list[int]:
         timeout=settings.ESMO_REQUEST_TIMEOUT,
         login_retries=settings.ESMO_LOGIN_RETRIES,
     )
-    rows = client.fetch_exams_since(since_esmo_id=None, max_pages=max(max_pages, 1))
-    ids = sorted({int(r["esmo_id"]) for r in rows if isinstance(r.get("esmo_id"), int)}, reverse=True)
-    return ids[: max(n, 1)]
+    try:
+        rows = client.fetch_exams_since(since_esmo_id=None, max_pages=max(max_pages, 1))
+        rows = [row for row in rows if _is_allowed_terminal(row.get("terminal"))]
+        ids = sorted({int(r["esmo_id"]) for r in rows if isinstance(r.get("esmo_id"), int)}, reverse=True)
+        return ids[: max(n, 1)]
+    finally:
+        client.close()
+
+
+def _is_allowed_terminal(raw_terminal: Any) -> bool:
+    text = " ".join(str(raw_terminal or "").split())
+    if not text:
+        return False
+
+    if re.search(r"\bTKM\s*[1-4]\s*-\s*terminal\b", text, flags=re.IGNORECASE):
+        return True
+
+    slot_match = re.search(r"\bterminal\s*\[(\d{1,3})\]", text, flags=re.IGNORECASE)
+    if slot_match and slot_match.group(1) in _ALLOWED_SLOT_IDS:
+        return True
+
+    if re.fullmatch(r"\d{1,3}", text) and text in _ALLOWED_SLOT_IDS:
+        return True
+
+    return False
 
 
 

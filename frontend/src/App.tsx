@@ -12,6 +12,7 @@ import DevicesPage from "@/pages/DevicesPage";
 import ReportsPage from "@/pages/ReportsPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
 import ToolsPage from "@/pages/ToolsPage";
+import MainJournalPage from "@/pages/MainJournalPage";
 
 export default function App() {
     return (
@@ -42,6 +43,8 @@ export default function App() {
                             />
                             <Route path="/reports" element={<ReportsPage />} />
                             <Route path="/lamp-self-rescuer" element={<ToolsPage />} />
+                            <Route path="/mine-journal" element={<MainJournalPage />} />
+                            <Route path="/main-journal" element={<Navigate to="/mine-journal" replace />} />
                             <Route path="/tools" element={<Navigate to="/lamp-self-rescuer" replace />} />
                             <Route
                                 path="/user-management"

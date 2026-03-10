@@ -1,22 +1,25 @@
+from __future__ import annotations
+
+import os
+import traceback
+
 import psycopg2
-import sys
 
-# Hardcoded from config.py
-DB_URL = "postgresql://minetrack_user:changeme@127.0.0.1:5432/minetrack_db"
 
-def test_connect():
-    print(f"Connecting to {DB_URL}...")
+def test_connect() -> None:
+    db_url = os.getenv("DATABASE_URL", "postgresql://user:password@127.0.0.1:5432/db_name")
+    print(f"Connecting to {db_url} ...")
     try:
-        conn = psycopg2.connect(DB_URL)
-        print("Connected successfully!")
+        conn = psycopg2.connect(db_url)
+        print("Connected successfully.")
         cur = conn.cursor()
         cur.execute("SELECT 1")
         print("Query executed:", cur.fetchone())
         conn.close()
-    except Exception as e:
-        print("Connection failed:", e)
-        import traceback
+    except Exception as exc:
+        print("Connection failed:", exc)
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     test_connect()

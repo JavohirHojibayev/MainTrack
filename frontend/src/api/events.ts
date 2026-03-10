@@ -26,6 +26,7 @@ export interface EventFilters {
     device_id?: number;
     event_type?: string;
     turnstile_only?: boolean;
+    main_journal_only?: boolean;
     status?: string;
     limit?: number;
     offset?: number;
@@ -40,6 +41,7 @@ function buildEventParams(filters: EventFilters = {}): URLSearchParams {
     if (filters.device_id) params.set("device_id", String(filters.device_id));
     if (filters.event_type) params.set("event_type", filters.event_type);
     if (filters.turnstile_only) params.set("turnstile_only", "true");
+    if (filters.main_journal_only) params.set("main_journal_only", "true");
     if (filters.status) params.set("status", filters.status);
     if (filters.limit) params.set("limit", String(filters.limit));
     if (filters.offset !== undefined) params.set("offset", String(filters.offset));

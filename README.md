@@ -102,3 +102,19 @@ To receive events from Hikvision turnstiles:
 ## License
 
 Private and Confidential.
+
+## Data Retention (Keep Only Today)
+
+If you need the system to keep only today's operational data:
+
+```bash
+cd backend
+set PYTHONPATH=%cd%
+venv\Scripts\python.exe scripts\retain_today_data.py
+venv\Scripts\python.exe scripts\retain_today_data.py --apply
+```
+
+Behavior:
+- `--apply` mode backs up older rows to `db/archives/YYYY-MM-DD/*.jsonl`
+- Deletes old rows from `events`, `medical_exams`, `audit_logs`
+- Keeps master data (`employees`, `devices`, `users`) intact

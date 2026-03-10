@@ -4,9 +4,12 @@ import urllib.request
 import base64
 import json
 import time
+import os
 
 TARGET_IP = "192.168.8.10"
-AUTH = b"Basic " + base64.b64encode(b"admin:QW1665gety")
+ESMO_USER = os.getenv("ESMO_USER", "admin")
+ESMO_PASS = os.getenv("ESMO_PASS", "change_me")
+AUTH = b"Basic " + base64.b64encode(f"{ESMO_USER}:{ESMO_PASS}".encode("utf-8"))
 PATHS_TO_CHECK = [
     "/cab/esmo_setting/terminal/",
     "/cab/api/",

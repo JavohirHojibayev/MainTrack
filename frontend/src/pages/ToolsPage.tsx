@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Box, Typography, TextField, Button, CircularProgress } from "@mui/material";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
@@ -86,7 +86,7 @@ export default function ToolsPage() {
         return issued.isAfter(returned);
     };
 
-    const loadRows = async () => {
+    const loadRows = useCallback(async () => {
         setLoading(true);
         try {
             const data = await fetchLampSelfRows({
@@ -106,11 +106,18 @@ export default function ToolsPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [appliedFilters.end_date, appliedFilters.search, appliedFilters.start_date]);
 
     useEffect(() => {
-        loadRows();
-    }, [appliedFilters.start_date, appliedFilters.end_date, appliedFilters.search]);
+        void loadRows();
+    }, [loadRows]);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            void loadRows();
+        }, 10000);
+        return () => window.clearInterval(timer);
+    }, [loadRows]);
 
     const handleApply = () => {
         setAppliedFilters({

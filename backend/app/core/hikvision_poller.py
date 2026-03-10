@@ -507,6 +507,7 @@ def poll_single_device(device_info: dict) -> int:
         db.rollback()
     finally:
         db.close()
+        client.close()
 
     return saved_count
 

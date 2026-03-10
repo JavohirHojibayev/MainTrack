@@ -10,6 +10,7 @@
         "esmo": "ESMO",
         "employees": "Employees",
         "tools": "Lamp & self-rescuer",
+        "mainJournal": "Mine Journal",
         "devices": "Devices",
         "reports": "Reports",
         "admin": "Admin"
@@ -234,6 +235,9 @@
             "done": "Done",
             "fail": "fail"
         }
+    },
+    "mainJournal": {
+        "title": "Mine Journal"
     },
     "topbar": {
         "search": "Search employees, devices...",

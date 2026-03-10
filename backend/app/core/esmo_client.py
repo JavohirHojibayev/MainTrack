@@ -30,7 +30,7 @@ class EsmoClient:
         self,
         base_url: str = "https://192.168.8.10/cab/",
         username: str = "admin",
-        password: str = "QW1665gety",
+        password: str = "change_me",
         timeout: int = 20,
         login_retries: int = 2,
         employee_max_pages: int | None = 100,
@@ -62,6 +62,9 @@ class EsmoClient:
                 "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
             }
         )
+
+    def close(self) -> None:
+        self.session.close()
 
     def _auth_headers(self) -> dict[str, str]:
         referer = f"{self.base_url}personal/"
@@ -537,11 +540,8 @@ class EsmoClient:
             not employee_name
             or not terminal
             or re.fullmatch(r"\d{1,4}", terminal.strip() if terminal else "") is not None
-            or re.search(r"\bTKM\s*[1-4]\s*-\s*terminal\b", terminal, flags=re.IGNORECASE) is None
             or result is None
             or employee_pass_id is None
-            or vitals.get("pulse") is None
-            or vitals.get("temperature") is None
         )
         if needs_detail:
             detail = self._fetch_exam_detail(esmo_id)

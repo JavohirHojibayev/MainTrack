@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Box, List, ListItemButton, ListItemIcon, Tooltip, Typography } from "@mui/material";
+import { Box, List, ListItemButton, ListItemIcon, Tooltip } from "@mui/material";
 import DashboardIcon from "@mui/icons-material/DashboardRounded";
 import TurnstileIcon from "./icons/TurnstileIcon";
 import PeopleIcon from "@mui/icons-material/PeopleRounded";
@@ -9,23 +9,31 @@ import AssessmentIcon from "@mui/icons-material/AssessmentRounded";
 import MedicalServicesIcon from "@mui/icons-material/MedicalServicesRounded";
 import AdminIcon from "@mui/icons-material/AdminPanelSettingsRounded";
 import LightbulbIcon from "@mui/icons-material/LightbulbRounded";
+import MineJournalIcon from "@mui/icons-material/LoginRounded";
 import { useAppTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 
 export default function Sidebar() {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const { tokens } = useAppTheme();
     const { role } = useAuth();
     const location = useLocation();
     const navigate = useNavigate();
     const w = tokens.sidebar.widthCollapsed;
     const isViewer = String(role || "").toLowerCase() === "viewer";
+    const lang = String(i18n.resolvedLanguage || i18n.language || "").toLowerCase();
+    const mainJournalFallback = lang.startsWith("ru")
+        ? "\u0416\u0443\u0440\u043d\u0430\u043b \u0448\u0430\u0445\u0442\u044b"
+        : lang.startsWith("uz")
+            ? "Shaxta jurnali"
+            : "Mine Journal";
 
     const navItems = [
         { path: "/dashboard", label: t("nav.dashboard"), icon: <DashboardIcon /> },
         { path: "/turnstile-journal", label: t("nav.events"), icon: <TurnstileIcon /> },
         { path: "/esmo-journal", label: t("nav.esmo"), icon: <MedicalServicesIcon /> },
         { path: "/lamp-self-rescuer", label: t("nav.tools"), icon: <LightbulbIcon /> },
+        { path: "/mine-journal", label: t("nav.mainJournal", { defaultValue: mainJournalFallback }), icon: <MineJournalIcon /> },
         { path: "/reports", label: t("nav.reports"), icon: <AssessmentIcon /> },
         { path: "/employees", label: t("nav.employees"), icon: <PeopleIcon />, hideForViewer: true },
         { path: "/devices", label: t("nav.devices"), icon: <DevicesIcon />, hideForViewer: true },

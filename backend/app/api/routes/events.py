@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.deps import get_db
 from app.core.audit import log_audit
 from app.core.rbac import require_roles
-from app.models.device import Device
+from app.models.device import Device, DeviceType
 from app.models.employee import Employee
 from app.models.employee_external_id import EmployeeExternalID
 from app.models.event import Event, EventStatus, EventType
@@ -310,6 +310,7 @@ def list_events(
     device_id: int | None = Query(default=None),
     event_type: EventType | None = Query(default=None),
     turnstile_only: bool = Query(default=False),
+    main_journal_only: bool = Query(default=False),
     status: EventStatus | None = Query(default=None),
     limit: int = Query(default=5000, ge=1, le=10000),
 ) -> list[EventOut]:
@@ -325,6 +326,14 @@ def list_events(
         query = query.filter(Event.event_type == event_type)
     if turnstile_only and not event_type:
         query = query.filter(Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]))
+    if main_journal_only:
+        query = query.filter(Event.device.has(Device.device_type == DeviceType.MINE_FACE))
+        if not event_type:
+            query = query.filter(
+                Event.event_type.in_(
+                    [EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT, EventType.MINE_IN, EventType.MINE_OUT]
+                )
+            )
     if status:
         query = query.filter(Event.status == status)
     if employee_no:
@@ -355,6 +364,7 @@ def list_events_paged(
     device_id: int | None = Query(default=None),
     event_type: EventType | None = Query(default=None),
     turnstile_only: bool = Query(default=False),
+    main_journal_only: bool = Query(default=False),
     status: EventStatus | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=25, ge=1, le=500),
@@ -371,6 +381,14 @@ def list_events_paged(
         query = query.filter(Event.event_type == event_type)
     if turnstile_only and not event_type:
         query = query.filter(Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]))
+    if main_journal_only:
+        query = query.filter(Event.device.has(Device.device_type == DeviceType.MINE_FACE))
+        if not event_type:
+            query = query.filter(
+                Event.event_type.in_(
+                    [EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT, EventType.MINE_IN, EventType.MINE_OUT]
+                )
+            )
     if status:
         query = query.filter(Event.status == status)
     if employee_no:

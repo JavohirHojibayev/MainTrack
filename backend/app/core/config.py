@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     ESMO_ENABLED: bool = True
     ESMO_BASE_URL: str = "https://192.168.8.10/cab/"
     ESMO_USER: str = "admin"
-    ESMO_PASS: str = "QW1665gety"
+    ESMO_PASS: str = "change_me"
     ESMO_POLL_INTERVAL: int = 30
     ESMO_REQUEST_TIMEOUT: int = 20
     ESMO_LOGIN_RETRIES: int = 2

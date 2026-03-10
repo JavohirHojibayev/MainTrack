@@ -424,13 +424,17 @@ def poll_esmo_once() -> int:
     finally:
         probe_db.close()
 
+    # Keep each poll cycle bounded so latest exams appear quickly in UI.
+    # Deep backfill can take a long time and block the first cycle.
+    configured_backfill_pages = max(settings.ESMO_BACKFILL_MAX_PAGES, 1)
+    cycle_backfill_pages = min(configured_backfill_pages, 12)
     exams = client.fetch_exams_since(
         since_esmo_id=last_known_esmo_id,
-        max_pages=max(settings.ESMO_BACKFILL_MAX_PAGES, 1),
+        max_pages=cycle_backfill_pages,
     )
     # Safety-net backfill: re-read recent pages and import rows missing in local DB.
     # This prevents data holes after temporary parser/layout changes or short outages.
-    recent_pages = min(max(settings.ESMO_BACKFILL_MAX_PAGES, 1), 4)
+    recent_pages = min(configured_backfill_pages, 4)
     recent_candidates = client.fetch_exams_since(since_esmo_id=None, max_pages=recent_pages)
     if recent_candidates:
         candidate_ids = [int(r["esmo_id"]) for r in recent_candidates if isinstance(r.get("esmo_id"), int)]
@@ -459,6 +463,13 @@ def poll_esmo_once() -> int:
 
     if not exams and client.last_error:
         logger.warning("ESMO poll returned no exams: %s", client.last_error)
+
+    if configured_backfill_pages > cycle_backfill_pages:
+        logger.info(
+            "ESMO Poller: limiting this cycle to %d pages (configured backfill=%d)",
+            cycle_backfill_pages,
+            configured_backfill_pages,
+        )
 
     if last_known_esmo_id:
         logger.info(
@@ -597,7 +608,8 @@ def poll_esmo_once() -> int:
             except IntegrityError:
                 db.rollback()
 
-        repaired_count = _repair_recent_incomplete_exams(db, client, esmo_device.id)
+        # Keep repair in small batches to avoid blocking the regular polling cycle.
+        repaired_count = _repair_recent_incomplete_exams(db, client, esmo_device.id, limit=10)
 
         if saved_count > 0:
             logger.info("ESMO Poller: Saved %d new medical exams", saved_count)
@@ -633,6 +645,7 @@ def poll_esmo_once() -> int:
             poll_error or "none",
         )
         db.close()
+        client.close()
     
     return saved_count + repaired_count
 

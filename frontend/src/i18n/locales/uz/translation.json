@@ -10,6 +10,7 @@
         "esmo": "ESMO",
         "employees": "Xodimlar",
         "tools": "Lampa & samospasatel",
+        "mainJournal": "Shaxta jurnali",
         "devices": "Qurilmalar",
         "reports": "Hisobotlar",
         "admin": "Admin"
@@ -213,6 +214,9 @@
             "done": "Done",
             "fail": "fail"
         }
+    },
+    "mainJournal": {
+        "title": "Shaxta jurnali"
     },
     "adminUsers": {
         "title": "Foydalanuvchilarni boshqarish",

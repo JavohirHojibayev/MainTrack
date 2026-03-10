@@ -12,6 +12,7 @@ from app.core.rbac import require_roles
 from app.core.esmo_poller import get_allowed_esmo_terminal_names
 from app.models.device import Device, DeviceType
 from app.models.employee import Employee
+from app.models.employee_external_id import EmployeeExternalID
 from app.models.user import User
 from app.models.event import Event, EventStatus, EventType
 from app.models.medical_exam import MedicalExam
@@ -52,6 +53,15 @@ TURNSTILE_OUT_HOSTS = {
     "192.168.0.220",
     "192.168.1.180",
 }
+
+MINE_TURNSTILE_HOSTS = {"192.168.1.180", "192.168.1.181"}
+
+LAMP_TURNSTILE_EVENT_TYPES = (
+    EventType.TURNSTILE_IN,
+    EventType.TURNSTILE_OUT,
+    EventType.MINE_IN,
+    EventType.MINE_OUT,
+)
 
 
 def _current_local_day() -> date:
@@ -106,6 +116,31 @@ def _format_employee_no(value: str | None, min_len: int = 8) -> str:
     if not normalized.isdigit():
         return normalized
     return normalized.zfill(min_len)
+
+
+def _normalize_identity_key(value: str | None) -> str:
+    return "".join(ch for ch in (value or "").strip().lower() if ch.isalnum())
+
+
+def _employee_no_lookup_keys(value: str | None) -> list[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return []
+
+    candidates = [raw]
+    normalized = _normalize_numeric_employee_no(raw)
+    if normalized and normalized not in candidates:
+        candidates.append(normalized)
+    formatted = _format_employee_no(raw)
+    if formatted and formatted not in candidates:
+        candidates.append(formatted)
+
+    keys: list[str] = []
+    for candidate in candidates:
+        key = _normalize_identity_key(candidate)
+        if key and key not in keys:
+            keys.append(key)
+    return keys
 
 
 def _payload_employee_no(source_payload: dict | None) -> str:
@@ -312,7 +347,26 @@ def get_report_summary(
     counts = counts_query.group_by(Event.event_type).all()
     
     mapping = {row[0]: row[1] for row in counts}
-    
+
+    mine_counts_query = (
+        db.query(Event.event_type, func.count(Event.id))
+        .join(Device, Device.id == Event.device_id)
+        .filter(
+            Event.status == EventStatus.ACCEPTED,
+            Device.device_type == DeviceType.MINE_FACE,
+            Event.event_type.in_(LAMP_TURNSTILE_EVENT_TYPES),
+        )
+    )
+    if date_from is not None:
+        mine_counts_query = mine_counts_query.filter(Event.event_ts >= date_from)
+    if date_to is not None:
+        mine_counts_query = mine_counts_query.filter(Event.event_ts <= date_to)
+
+    mine_rows = mine_counts_query.group_by(Event.event_type).all()
+    mine_mapping = {event_type: count for event_type, count in mine_rows}
+    mine_in_count = int(mine_mapping.get(EventType.MINE_IN, 0)) + int(mine_mapping.get(EventType.TURNSTILE_IN, 0))
+    mine_out_count = int(mine_mapping.get(EventType.MINE_OUT, 0)) + int(mine_mapping.get(EventType.TURNSTILE_OUT, 0))
+ 
     # Blocked attempts (status REJECTED)
     blocked_query = db.query(func.count(Event.id)).filter(Event.status == EventStatus.REJECTED)
     if date_from is not None:
@@ -335,8 +389,8 @@ def get_report_summary(
         esmo_fail=esmo_failed_latest + esmo_review_latest,
         tool_takes=mapping.get(EventType.TOOL_TAKE, 0),
         tool_returns=mapping.get(EventType.TOOL_RETURN, 0),
-        mine_in=mapping.get(EventType.MINE_IN, 0),
-        mine_out=mapping.get(EventType.MINE_OUT, 0),
+        mine_in=mine_in_count,
+        mine_out=mine_out_count,
         blocked=blocked_count
     )
 
@@ -480,19 +534,70 @@ def lamp_self_rescuer_status(
     employees = db.query(Employee).filter(Employee.id.in_(employee_ids)).all()
     employees_by_id = {emp.id: emp for emp in employees}
 
-    turnstile_rows = (
-        db.query(Event.employee_id, func.max(Event.event_ts))
+    mine_external_rows = (
+        db.query(EmployeeExternalID.employee_id, EmployeeExternalID.external_id)
         .filter(
-            Event.status == EventStatus.ACCEPTED,
-            Event.event_type.in_([EventType.TURNSTILE_IN, EventType.TURNSTILE_OUT]),
-            Event.employee_id.in_(employee_ids),
-            Event.event_ts >= start_local,
-            Event.event_ts < end_local,
+            EmployeeExternalID.system == "HIKVISION_MINE",
+            EmployeeExternalID.employee_id.in_(employee_ids),
         )
-        .group_by(Event.employee_id)
         .all()
     )
-    turnstile_by_employee = {employee_id: ts for employee_id, ts in turnstile_rows}
+    mine_external_by_employee: dict[int, str] = {
+        int(employee_id): str(external_id or "").strip()
+        for employee_id, external_id in mine_external_rows
+        if str(external_id or "").strip()
+    }
+
+    turnstile_events = (
+        db.query(
+            Event.employee_id,
+            Event.event_ts,
+            Event.source_payload,
+            Employee.employee_no,
+            Employee.first_name,
+            Employee.last_name,
+            Employee.patronymic,
+        )
+        .join(Device, Device.id == Event.device_id)
+        .join(Employee, Employee.id == Event.employee_id)
+        .filter(
+            Event.status == EventStatus.ACCEPTED,
+            Event.event_type.in_(LAMP_TURNSTILE_EVENT_TYPES),
+            Event.event_ts >= start_local,
+            Event.event_ts < end_local,
+            Device.host.in_(MINE_TURNSTILE_HOSTS),
+        )
+        .order_by(Event.event_ts.desc(), Event.id.desc())
+        .all()
+    )
+
+    turnstile_by_employee_id: dict[int, datetime] = {}
+    turnstile_by_employee_no: dict[str, datetime] = {}
+    turnstile_by_full_name: dict[str, datetime] = {}
+    for turnstile_employee_id, event_ts, source_payload, event_employee_no, first_name, last_name, patronymic in turnstile_events:
+        current_by_id = turnstile_by_employee_id.get(turnstile_employee_id)
+        if current_by_id is None or event_ts > current_by_id:
+            turnstile_by_employee_id[turnstile_employee_id] = event_ts
+
+        payload_no = _payload_employee_no(source_payload)
+        for lookup_value in (event_employee_no, payload_no):
+            for key in _employee_no_lookup_keys(lookup_value):
+                current_by_no = turnstile_by_employee_no.get(key)
+                if current_by_no is None or event_ts > current_by_no:
+                    turnstile_by_employee_no[key] = event_ts
+
+        event_full_name = f"{last_name} {first_name} {patronymic or ''}".strip()
+        payload_name = ""
+        if isinstance(source_payload, dict):
+            payload_name = str(source_payload.get("name") or "").strip()
+
+        for lookup_name in (event_full_name, payload_name):
+            name_key = _normalize_identity_key(lookup_name)
+            if not name_key:
+                continue
+            current_by_name = turnstile_by_full_name.get(name_key)
+            if current_by_name is None or event_ts > current_by_name:
+                turnstile_by_full_name[name_key] = event_ts
 
     tool_rows = (
         db.query(
@@ -582,12 +687,28 @@ def lamp_self_rescuer_status(
             status = "NOT_ISSUED"
             quantity = 0
 
+        turnstile_time = turnstile_by_employee_id.get(employee_id)
+        if turnstile_time is None:
+            no_candidates = [employee.employee_no, mine_external_by_employee.get(employee_id)]
+            for candidate in no_candidates:
+                if turnstile_time is not None:
+                    break
+                for key in _employee_no_lookup_keys(candidate):
+                    ts = turnstile_by_employee_no.get(key)
+                    if ts is not None:
+                        turnstile_time = ts
+                        break
+        if turnstile_time is None:
+            name_key = _normalize_identity_key(full_name)
+            if name_key:
+                turnstile_time = turnstile_by_full_name.get(name_key)
+
         result.append(
             LampSelfStatusItem(
                 employee_id=employee.id,
                 employee_no=employee.employee_no,
                 full_name=full_name,
-                turnstile_time=turnstile_by_employee.get(employee_id),
+                turnstile_time=turnstile_time,
                 esmo_time=exam.timestamp,
                 esmo_status=esmo_status,
                 tool_name="Lamp & self-rescuer",

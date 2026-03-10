@@ -30,6 +30,10 @@ class HikvisionClient:
         # Local device IPs must not use global system proxy.
         self.session.trust_env = False
 
+    def close(self) -> None:
+        """Release HTTP session sockets."""
+        self.session.close()
+
     def _get(self, path: str) -> requests.Response | None:
         """Send a READ-ONLY GET request. Never sends POST/PUT/DELETE."""
         try:
@@ -75,6 +79,8 @@ class HikvisionClient:
         except Exception as exc:
             logger.warning("Failed to parse deviceInfo: %s", exc)
             return None
+        finally:
+            resp.close()
 
     def check_connection(self) -> bool:
         """Check if device is reachable and ISAPI responds."""
@@ -126,6 +132,8 @@ class HikvisionClient:
             except (json.JSONDecodeError, ValueError):
                 logger.warning("Invalid JSON from AcsEvent search")
                 break
+            finally:
+                resp.close()
 
             acs_event = data.get("AcsEvent", {})
             total_matches = acs_event.get("totalMatches", 0)
@@ -174,6 +182,8 @@ class HikvisionClient:
             except (json.JSONDecodeError, ValueError):
                 logger.warning("Invalid JSON from UserInfo search")
                 break
+            finally:
+                resp.close()
 
             user_search = data.get("UserInfoSearch", {})
             total_matches = user_search.get("totalMatches", 0)
